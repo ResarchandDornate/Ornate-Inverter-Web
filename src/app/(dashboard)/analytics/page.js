@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
   BarChart,
@@ -13,71 +12,34 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import { BatteryCharging, Zap, Activity, TrendingUp, Calendar } from "lucide-react";
-import { getData } from "@/lib/api";
-import { QUERY_KEYS } from "@/lib/queryKeys";
+import { Zap, Activity, TrendingUp, Calendar, Thermometer } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import KpiCard from "@/components/KpiCard";
-
-function getEnergy(inv) {
-  return Number(
-    inv.energy_kwh ??
-    inv.daily_energy_kwh ??
-    inv.total_energy_kwh ??
-    inv.energy_today ??
-    inv.total_energy ??
-    inv.energy ??
-    0
-  );
-}
-function getPower(inv) {
-  return Number(
-    inv.power_w ??
-    inv.current_power_w ??
-    inv.current_power ??
-    inv.power ??
-    0
-  );
-}
+import { useLiveInverters } from "@/hooks/useLiveInverters";
 
 export default function AnalyticsPage() {
   const today = new Date().toISOString().split("T")[0];
   const [date, setDate] = useState(today);
 
-  const { data: inverterData } = useQuery({
-    queryKey: QUERY_KEYS.INVERTERS,
-    queryFn: () => getData("/inverter/inverters/"),
-  });
+  const { data: inverters = [] } = useLiveInverters();
 
-  const { data: summaryData } = useQuery({
-    queryKey: QUERY_KEYS.USER_SUMMARY,
-    queryFn: () => getData("/inverter/power-generation/user-summary/"),
-    refetchInterval: 10000,
-  });
-
-  const invertersList = useMemo(
-    () => inverterData?.results || (Array.isArray(inverterData) ? inverterData : []),
-    [inverterData]
-  );
-
-  const inverters = useMemo(() => {
-    const summaryMap = new Map();
-    (summaryData?.inverters || []).forEach((inv) => summaryMap.set(inv.id, inv));
-    return invertersList.map((inv) => ({ ...inv, ...summaryMap.get(inv.id) }));
-  }, [invertersList, summaryData]);
-
-  const totalEnergy = Number(summaryData?.total_energy_kwh ?? 0);
-  const totalPower = Number(summaryData?.total_power_w ?? 0);
+  const totalPower = inverters.reduce((s, i) => s + Number(i.power_out ?? 0), 0);
+  const totalPowerIn = inverters.reduce((s, i) => s + Number(i.power_in ?? 0), 0);
   const onlineCount = inverters.filter((i) => i.grid_connected).length;
-  const avgEnergy = inverters.length ? totalEnergy / inverters.length : 0;
+  const avgTemp = useMemo(() => {
+    const valid = inverters.filter((i) => i.temperature != null);
+    if (!valid.length) return 0;
+    return valid.reduce((s, i) => s + Number(i.temperature), 0) / valid.length;
+  }, [inverters]);
+  const avgPower = inverters.length ? totalPower / inverters.length : 0;
 
   const chartData = [...inverters]
     .map((inv) => ({
       name: inv.name || `#${inv.id}`,
-      energy: getEnergy(inv),
-      power: getPower(inv),
+      power_out: Number(inv.power_out ?? 0),
+      power_in: Number(inv.power_in ?? 0),
     }))
-    .sort((a, b) => b.energy - a.energy);
+    .sort((a, b) => b.power_out - a.power_out);
 
   const isToday = date === today;
 
@@ -85,15 +47,14 @@ export default function AnalyticsPage() {
     <>
       <Topbar title="Analytics" breadcrumbs={["Dashboard", "Analytics"]} />
       <main className="flex-1 px-6 py-6 max-w-[1600px] w-full">
-
         {/* Header row with date picker */}
         <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
           <div>
-            <h2 className="text-lg font-bold text-slate-900">Daily Generation Report</h2>
+            <h2 className="text-lg font-bold text-slate-900">Live Inverter Snapshot</h2>
             <p className="text-sm text-slate-500">
               {isToday
-                ? "Live data for today · auto-refreshes every 10s"
-                : `Data for ${format(new Date(date + "T00:00:00"), "dd MMM yyyy")}`}
+                ? "Real-time AC / DC power · auto-refreshes every 10s"
+                : `Date filter UI only — backend doesn't accept date param on /status. Showing live.`}
             </p>
           </div>
           <label className="flex items-center gap-2 border border-slate-200 rounded-lg px-3 py-2 bg-white cursor-pointer hover:border-orange-400 transition">
@@ -111,18 +72,18 @@ export default function AnalyticsPage() {
         {/* KPI cards */}
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <KpiCard
-            label="Total Energy Today"
-            value={totalEnergy.toFixed(3)}
-            unit="kWh"
-            icon={BatteryCharging}
-            accent="blue"
-          />
-          <KpiCard
-            label="Live Power"
+            label="Total Power Out (AC)"
             value={totalPower.toFixed(0)}
             unit="W"
             icon={Zap}
             accent="orange"
+          />
+          <KpiCard
+            label="Total Power In (DC)"
+            value={totalPowerIn.toFixed(0)}
+            unit="W"
+            icon={TrendingUp}
+            accent="indigo"
           />
           <KpiCard
             label="Inverters Online"
@@ -131,20 +92,20 @@ export default function AnalyticsPage() {
             accent="green"
           />
           <KpiCard
-            label="Avg. per Inverter"
-            value={avgEnergy.toFixed(3)}
-            unit="kWh"
-            icon={TrendingUp}
-            accent="indigo"
+            label="Avg Temperature"
+            value={avgTemp.toFixed(1)}
+            unit="°C"
+            icon={Thermometer}
+            accent="red"
           />
         </section>
 
-        {/* Bar chart - energy by inverter */}
+        {/* Bar chart - power by inverter */}
         <section className="bg-white rounded-xl border border-slate-200 p-5 mb-4">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h3 className="text-base font-bold text-slate-900">Energy by Inverter</h3>
-              <p className="text-xs text-slate-500">kWh generated per inverter today</p>
+              <h3 className="text-base font-bold text-slate-900">Power Output by Inverter</h3>
+              <p className="text-xs text-slate-500">Live AC power (W) sorted high → low</p>
             </div>
             <span className="text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
               {inverters.length} inverters
@@ -168,14 +129,14 @@ export default function AnalyticsPage() {
                   />
                   <YAxis
                     tick={{ fontSize: 11, fill: "#6B7280" }}
-                    unit=" kWh"
+                    unit=" W"
                     width={70}
                   />
                   <Tooltip
-                    formatter={(v) => [`${Number(v).toFixed(3)} kWh`, "Energy"]}
+                    formatter={(v, name) => [`${Number(v).toFixed(0)} W`, name]}
                     contentStyle={{ fontSize: 12, borderRadius: 8 }}
                   />
-                  <Bar dataKey="energy" radius={[4, 4, 0, 0]} maxBarSize={52}>
+                  <Bar dataKey="power_out" name="Power Out (AC)" radius={[4, 4, 0, 0]} maxBarSize={52}>
                     {chartData.map((_, i) => (
                       <Cell
                         key={i}
@@ -190,70 +151,72 @@ export default function AnalyticsPage() {
           )}
         </section>
 
-        {/* Per-inverter breakdown table */}
+        {/* Per-inverter breakdown */}
         <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
             <h3 className="text-base font-bold text-slate-900">Per-Inverter Breakdown</h3>
             <span className="text-xs text-slate-400">
-              Total: <span className="font-semibold text-blue-600">{totalEnergy.toFixed(3)} kWh</span>
+              Total Out: <span className="font-semibold text-orange-600">{totalPower.toFixed(0)} W</span> ·
+              Avg: <span className="font-semibold text-blue-600">{avgPower.toFixed(0)} W</span>
             </span>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500">
                 <tr>
-                  <th className="text-left px-5 py-3 font-semibold">#</th>
                   <th className="text-left px-5 py-3 font-semibold">Inverter</th>
-                  <th className="text-left px-5 py-3 font-semibold">Serial</th>
-                  <th className="text-left px-5 py-3 font-semibold">Location</th>
-                  <th className="text-right px-5 py-3 font-semibold">Energy (kWh)</th>
-                  <th className="text-right px-5 py-3 font-semibold">Live Power (W)</th>
+                  <th className="text-right px-5 py-3 font-semibold">P-out (W)</th>
+                  <th className="text-right px-5 py-3 font-semibold">P-in (W)</th>
+                  <th className="text-right px-5 py-3 font-semibold">Voltage</th>
+                  <th className="text-right px-5 py-3 font-semibold">Current</th>
+                  <th className="text-right px-5 py-3 font-semibold">Temp</th>
                   <th className="text-right px-5 py-3 font-semibold">Status</th>
                 </tr>
               </thead>
               <tbody>
-                {inverters.map((inv, i) => {
-                  const energy = getEnergy(inv);
-                  const power = getPower(inv);
-                  const pct = totalEnergy > 0 ? (energy / totalEnergy) * 100 : 0;
-                  return (
-                    <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
-                      <td className="px-5 py-3 text-slate-400 text-xs font-mono">{i + 1}</td>
-                      <td className="px-5 py-3 font-semibold text-slate-900">{inv.name}</td>
-                      <td className="px-5 py-3 text-xs font-mono text-slate-500">{inv.serial_number}</td>
-                      <td className="px-5 py-3 text-slate-600">{inv.city || "—"}</td>
-                      <td className="px-5 py-3 text-right">
-                        <span className="font-semibold text-blue-700">{energy.toFixed(3)}</span>
-                        {totalEnergy > 0 && (
-                          <span className="ml-2 text-[10px] text-slate-400">({pct.toFixed(1)}%)</span>
-                        )}
-                      </td>
-                      <td className="px-5 py-3 text-right text-slate-700">{power.toFixed(0)}</td>
-                      <td className="px-5 py-3 text-right">
-                        <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${
-                          inv.grid_connected
-                            ? "bg-green-50 text-green-700"
-                            : "bg-red-50 text-red-700"
-                        }`}>
-                          {inv.grid_connected ? "Online" : "Offline"}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {[...inverters]
+                  .sort((a, b) => Number(b.power_out ?? 0) - Number(a.power_out ?? 0))
+                  .map((inv) => {
+                    const online = inv.grid_connected;
+                    return (
+                      <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50">
+                        <td className="px-5 py-3 font-semibold text-slate-900">
+                          {inv.name}
+                          <p className="text-xs text-slate-400 font-normal font-mono">{inv.serial_number}</p>
+                        </td>
+                        <td className="px-5 py-3 text-right font-semibold text-orange-600">
+                          {Number(inv.power_out ?? 0).toFixed(0)}
+                        </td>
+                        <td className="px-5 py-3 text-right text-slate-700">
+                          {Number(inv.power_in ?? 0).toFixed(0)}
+                        </td>
+                        <td className="px-5 py-3 text-right text-slate-700">
+                          {inv.voltage != null ? `${Number(inv.voltage).toFixed(1)} V` : "—"}
+                        </td>
+                        <td className="px-5 py-3 text-right text-slate-700">
+                          {inv.current != null ? `${Number(inv.current).toFixed(2)} A` : "—"}
+                        </td>
+                        <td className="px-5 py-3 text-right text-slate-700">
+                          {inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—"}
+                        </td>
+                        <td className="px-5 py-3 text-right">
+                          <span
+                            className={`inline-block w-1.5 h-1.5 rounded-full mr-1 ${
+                              online ? "bg-green-500" : "bg-red-500"
+                            }`}
+                          />
+                          <span className={`text-xs font-semibold ${online ? "text-green-700" : "text-red-700"}`}>
+                            {online ? "Online" : "Offline"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 {!inverters.length && (
-                  <tr>
-                    <td colSpan={7} className="text-center text-slate-400 py-12 text-sm">
-                      No inverter data available
-                    </td>
-                  </tr>
+                  <tr><td colSpan={7} className="text-center text-slate-400 py-12 text-sm">No data.</td></tr>
                 )}
               </tbody>
             </table>
-          </div>
-          <div className="px-5 py-3 border-t border-slate-100 text-xs text-slate-500 flex justify-between">
-            <span>Showing {inverters.length} inverters</span>
-            <span>Auto-refreshes every 10s</span>
           </div>
         </section>
       </main>

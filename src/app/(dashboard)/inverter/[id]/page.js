@@ -42,6 +42,8 @@ export default function InverterDetailsPage() {
   const { id: inverterId } = useParams();
   const [tab, setTab] = useState("overview");
 
+  // Per API docs: ?inverter=ID&ordering=-timestamp&limit=N
+  // (no `date` parameter exists; date filtering uses `start`/`end` ISO datetimes)
   const {
     data: inverterHistory,
     isLoading,
@@ -50,8 +52,9 @@ export default function InverterDetailsPage() {
   } = useQuery({
     queryKey: QUERY_KEYS.INVERTER_DETAILS(inverterId),
     queryFn: async () => {
-      const today = new Date().toISOString().split("T")[0];
-      const response = await getData(`/inverter/inverter-data/?date=${today}&inverter=${inverterId}`);
+      const response = await getData(
+        `/inverter/inverter-data/?inverter=${inverterId}&ordering=-timestamp&limit=500`
+      );
       const data = response.results || (Array.isArray(response) ? response : []);
       data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       return data;
@@ -60,16 +63,10 @@ export default function InverterDetailsPage() {
     refetchInterval: 10000,
   });
 
-  const { data: gridStatusData } = useQuery({
-    queryKey: QUERY_KEYS.GRID_STATUS(inverterId),
-    queryFn: () => getData(`/inverter/inverters/${inverterId}/grid_status/`),
-    enabled: !!inverterId,
-    refetchInterval: 10000,
-  });
-
   const generationData = inverterHistory || [];
   const latestReading = generationData[0] || {};
-  const gridConnected = gridStatusData?.grid_connected ?? null;
+  // grid_connected comes from the latest telemetry record itself — no separate endpoint.
+  const gridConnected = latestReading.grid_connected ?? null;
   const offline = gridConnected === false;
   const bitmask = Number(latestReading.fault_bitmask ?? 0);
   const hasFault = bitmask > 0;
@@ -81,27 +78,27 @@ export default function InverterDetailsPage() {
       .reverse()
       .map((d) => ({
         time: format(new Date(d.timestamp), "HH:mm:ss"),
-        power: parseFloat(d.power || 0),
+        power: parseFloat(d.power_out || 0),
       }));
   }, [generationData]);
 
-  // Compute daily energy: each reading covers ~10 s interval, power is in W
-  // Energy (kWh) = Power (W) × 10s / 3600s/h / 1000
+  // Daily energy: ESP32 publishes every 5s per API docs.
+  // Energy (kWh) = Power (W) × 5s / 3600s/h / 1000
   const dailyEnergyKwh = useMemo(() => {
     return generationData.reduce(
-      (sum, d) => sum + parseFloat(d.power || 0) * 10 / 3600 / 1000,
+      (sum, d) => sum + parseFloat(d.power_out || 0) * 5 / 3600 / 1000,
       0
     );
   }, [generationData]);
 
   const peakPowerW = useMemo(() => {
     if (!generationData.length) return 0;
-    return Math.max(...generationData.map((d) => parseFloat(d.power || 0)));
+    return Math.max(...generationData.map((d) => parseFloat(d.power_out || 0)));
   }, [generationData]);
 
   const avgPowerW = useMemo(() => {
     if (!generationData.length) return 0;
-    return generationData.reduce((s, d) => s + parseFloat(d.power || 0), 0) / generationData.length;
+    return generationData.reduce((s, d) => s + parseFloat(d.power_out || 0), 0) / generationData.length;
   }, [generationData]);
 
   return (
@@ -124,7 +121,7 @@ export default function InverterDetailsPage() {
             <div>
               <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider">Live status</p>
               <h2 className="text-xl font-bold text-slate-900 mt-0.5">
-                {offline ? "0" : parseFloat(latestReading.power || 0).toFixed(0)} <span className="text-sm text-slate-400 font-normal">W output</span>
+                {offline ? "0" : parseFloat(latestReading.power_out || 0).toFixed(0)} <span className="text-sm text-slate-400 font-normal">W output</span>
               </h2>
             </div>
           </div>
@@ -305,7 +302,7 @@ export default function InverterDetailsPage() {
                           <th className="text-left px-5 py-3 font-semibold">Time</th>
                           <th className="text-right px-5 py-3 font-semibold">Voltage (V)</th>
                           <th className="text-right px-5 py-3 font-semibold">Current (A)</th>
-                          <th className="text-right px-5 py-3 font-semibold">Power (W)</th>
+                          <th className="text-right px-5 py-3 font-semibold">Power Out (W)</th>
                           <th className="text-right px-5 py-3 font-semibold">Temp (°C)</th>
                         </tr>
                       </thead>
@@ -320,7 +317,7 @@ export default function InverterDetailsPage() {
                             </td>
                             <td className="px-5 py-2.5 text-right text-slate-700">{parseFloat(item.voltage).toFixed(1)}</td>
                             <td className="px-5 py-2.5 text-right text-slate-700">{parseFloat(item.current).toFixed(2)}</td>
-                            <td className="px-5 py-2.5 text-right font-semibold text-orange-600">{parseFloat(item.power).toFixed(0)}</td>
+                            <td className="px-5 py-2.5 text-right font-semibold text-orange-600">{parseFloat(item.power_out).toFixed(0)}</td>
                             <td className="px-5 py-2.5 text-right text-slate-700">{item.temperature ?? "—"}</td>
                           </tr>
                         ))}

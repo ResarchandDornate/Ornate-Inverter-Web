@@ -2,44 +2,22 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { useQuery } from "@tanstack/react-query";
 import { Search, RefreshCw, Plus } from "lucide-react";
-import { getData } from "@/lib/api";
-import { QUERY_KEYS } from "@/lib/queryKeys";
 import Topbar from "@/components/Topbar";
 import StatusBadge from "@/components/StatusBadge";
+import { useLiveInverters } from "@/hooks/useLiveInverters";
 
 export default function InvertersListPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
 
-  const { data: inverterData, refetch, isRefetching } = useQuery({
-    queryKey: QUERY_KEYS.INVERTERS,
-    queryFn: () => getData("/inverter/inverters/"),
-    refetchInterval: 10000,
-  });
-  const { data: summaryData } = useQuery({
-    queryKey: QUERY_KEYS.USER_SUMMARY,
-    queryFn: () => getData("/inverter/power-generation/user-summary/"),
-    refetchInterval: 10000,
-  });
-
-  const invertersList = useMemo(
-    () => inverterData?.results || (Array.isArray(inverterData) ? inverterData : []),
-    [inverterData]
-  );
-
-  const inverters = useMemo(() => {
-    const summaryMap = new Map();
-    (summaryData?.inverters || []).forEach((inv) => summaryMap.set(inv.id, inv));
-    return invertersList.map((inv) => ({ ...inv, ...summaryMap.get(inv.id) }));
-  }, [invertersList, summaryData]);
+  const { data: inverters = [], refetch, isRefetching } = useLiveInverters();
 
   const filtered = useMemo(() => {
     let arr = inverters;
     if (filter === "online") arr = arr.filter((i) => i.grid_connected);
     if (filter === "offline") arr = arr.filter((i) => !i.grid_connected);
-    if (filter === "faults") arr = arr.filter((i) => (i.fault_bitmask ?? 0) > 0);
+    if (filter === "faults") arr = arr.filter((i) => Number(i.fault_bitmask ?? 0) > 0);
 
     if (search) {
       const q = search.toLowerCase();
@@ -47,7 +25,8 @@ export default function InvertersListPage() {
         (inv) =>
           inv.name?.toLowerCase().includes(q) ||
           inv.serial_number?.toLowerCase().includes(q) ||
-          inv.city?.toLowerCase().includes(q)
+          inv.address?.toLowerCase().includes(q) ||
+          inv.model?.toLowerCase().includes(q)
       );
     }
     return arr;
@@ -64,7 +43,7 @@ export default function InvertersListPage() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, serial, city..."
+              placeholder="Search by name, serial, address, model..."
               className="bg-transparent outline-none text-sm ml-2 flex-1"
             />
           </div>
@@ -106,17 +85,18 @@ export default function InvertersListPage() {
                 <tr>
                   <th className="text-left px-5 py-3 font-semibold">Inverter</th>
                   <th className="text-left px-5 py-3 font-semibold">Serial No.</th>
-                  <th className="text-left px-5 py-3 font-semibold">Location</th>
+                  <th className="text-left px-5 py-3 font-semibold">Model</th>
                   <th className="text-left px-5 py-3 font-semibold">Status</th>
-                  <th className="text-right px-5 py-3 font-semibold">Live Power</th>
-                  <th className="text-right px-5 py-3 font-semibold">Energy (kWh)</th>
+                  <th className="text-right px-5 py-3 font-semibold">Power Out (W)</th>
+                  <th className="text-right px-5 py-3 font-semibold">Voltage</th>
+                  <th className="text-right px-5 py-3 font-semibold">Temp</th>
                   <th className="text-right px-5 py-3 font-semibold">Faults</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((inv) => {
-                  const bitmask = inv.fault_bitmask ?? 0;
+                  const bitmask = Number(inv.fault_bitmask ?? 0);
                   const status = bitmask > 0 ? "fault" : inv.grid_connected ? "online" : "offline";
                   return (
                     <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
@@ -127,13 +107,16 @@ export default function InvertersListPage() {
                         <p className="text-xs text-slate-400">ID: {inv.id}</p>
                       </td>
                       <td className="px-5 py-3.5 text-slate-600 font-mono text-xs">{inv.serial_number}</td>
-                      <td className="px-5 py-3.5 text-slate-700 text-sm">{inv.city || "—"}</td>
+                      <td className="px-5 py-3.5 text-slate-700 text-xs">{inv.model || "—"}</td>
                       <td className="px-5 py-3.5"><StatusBadge status={status} /></td>
-                      <td className="px-5 py-3.5 text-right text-slate-700">
-                        {Number(inv.power_w ?? inv.current_power_w ?? inv.current_power ?? inv.power ?? 0).toFixed(0)} W
-                      </td>
                       <td className="px-5 py-3.5 text-right text-slate-700 font-semibold">
-                        {Number(inv.energy_kwh ?? inv.daily_energy_kwh ?? inv.total_energy_kwh ?? inv.energy_today ?? inv.total_energy ?? 0).toFixed(3)}
+                        {Number(inv.power_out ?? 0).toFixed(0)}
+                      </td>
+                      <td className="px-5 py-3.5 text-right text-slate-700">
+                        {inv.voltage != null ? `${Number(inv.voltage).toFixed(1)} V` : "—"}
+                      </td>
+                      <td className="px-5 py-3.5 text-right text-slate-700">
+                        {inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—"}
                       </td>
                       <td className="px-5 py-3.5 text-right">
                         {bitmask > 0 ? (
@@ -157,7 +140,7 @@ export default function InvertersListPage() {
                 })}
                 {!filtered.length && (
                   <tr>
-                    <td colSpan={8} className="text-center text-slate-400 py-12 text-sm">
+                    <td colSpan={9} className="text-center text-slate-400 py-12 text-sm">
                       No inverters match your filter.
                     </td>
                   </tr>

@@ -24,13 +24,12 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await postData("/auth/signin/", { email, password });
-      const token = res?.data?.tokens?.access;
-      const message = res?.message || res?.data?.message || "Login successful!";
-
+      // Per API docs: response is { access, refresh, user } at the top level.
+      const token = res?.access || res?.data?.access;
       if (!token) throw new Error("No access token received");
 
       setToken(token);
-      showSuccess(message);
+      showSuccess("Welcome back!");
       router.replace("/dashboard");
     } catch (err) {
       showError(extractApiMessage(err, "Login failed. Please try again."));

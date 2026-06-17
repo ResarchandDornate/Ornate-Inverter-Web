@@ -43,34 +43,34 @@ export default function InverterDetailsPage() {
   const { id: inverterId } = useParams();
   const [tab, setTab] = useState("overview");
 
-  // Per API docs: ?inverter=ID&ordering=-timestamp&limit=N
-  // (no `date` parameter exists; date filtering uses `start`/`end` ISO datetimes)
+  // Memoize so the queryKey stays stable across renders (only changes at midnight).
+  const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
+
+  // Fetch ALL of today's readings (date-filtered).
   const {
     data: inverterHistory,
     isLoading,
     refetch: onRefresh,
     isRefetching,
   } = useQuery({
-    queryKey: QUERY_KEYS.INVERTER_DETAILS(inverterId),
+    queryKey: [...QUERY_KEYS.INVERTER_DETAILS(inverterId), todayStr],
     queryFn: async () => {
-      // limit=120 ≈ 10 minutes of 5-second samples — enough for the chart
-      // and table, much lighter than the previous 500.
+      // All of today's readings (filtered by start=midnight). Bumped polling
+      // to 30s because the payload is much larger than the previous limit=120.
       const response = await getData(
-        `/inverter/inverter-data/?inverter=${inverterId}&ordering=-timestamp&limit=120`
+        `/inverter/inverter-data/?inverter=${inverterId}&start=${todayStr}T00:00:00&ordering=-timestamp&limit=5000`
       );
       const data = response.results || (Array.isArray(response) ? response : []);
       data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       return data;
     },
     enabled: !!inverterId,
-    refetchInterval: 15000,
-    staleTime: 10000,
+    refetchInterval: 30000,
+    staleTime: 25000,
   });
 
   // Real daily energy from backend hourly aggregates (accurate; survives
   // missed polls/page reloads instead of being a client-side integration).
-  // Memoize so queryKey stays stable across renders (only changes at midnight).
-  const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
   const { data: hourlyEnergyData } = useQuery({
     queryKey: ["inverterDailyEnergy", inverterId, todayStr],
     queryFn: () =>
@@ -102,7 +102,14 @@ export default function InverterDetailsPage() {
     grid_connected: gridStatusData?.grid_connected ?? latestReading.grid_connected,
   };
   const gridConnected = merged.grid_connected ?? null;
-  const offline = gridConnected === false;
+  // Treat the device as "offline" for telemetry-display purposes whenever it
+  // isn't reachable (is_online: false / status: offline). Otherwise stale
+  // grid_connected from the last cached reading would still show ON even
+  // though we can't talk to the inverter.
+  const offline =
+    merged.is_online === false ||
+    merged.status === "offline" ||
+    gridConnected === false;
   const bitmask = Number(latestReading.fault_bitmask ?? 0);
   const hasFault = bitmask > 0;
   const status = computeStatus(merged);
@@ -246,11 +253,11 @@ export default function InverterDetailsPage() {
                 />
                 <StatusCard
                   title="Grid Status"
-                  value={gridConnected === null ? "..." : gridConnected ? "ON" : "OFF"}
+                  value={offline ? "OFF" : gridConnected === null ? "..." : gridConnected ? "ON" : "OFF"}
                   unit=""
-                  icon={gridConnected ? Save : AlertCircle}
-                  color={gridConnected ? "#10B981" : "#EF4444"}
-                  bgClass={gridConnected ? "bg-green-100" : "bg-red-100"}
+                  icon={offline || !gridConnected ? AlertCircle : Save}
+                  color={offline || !gridConnected ? "#EF4444" : "#10B981"}
+                  bgClass={offline || !gridConnected ? "bg-red-100" : "bg-green-100"}
                 />
                 <StatusCard
                   title="VPV"

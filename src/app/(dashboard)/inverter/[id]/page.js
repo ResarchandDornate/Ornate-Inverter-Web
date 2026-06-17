@@ -39,9 +39,27 @@ const TABS = [
   { id: "faults", label: "Faults" },
 ];
 
+const CHART_RANGES = [
+  { id: "10m",    label: "Last 10 min",   source: "raw", windowMin: 10, bucketSec: 0 },
+  { id: "1h",     label: "Last 1 hour",   source: "raw", windowMin: 60, bucketSec: 60 },
+  { id: "1d",     label: "Last 24 hours", source: "pg",  windowHr: 24,  bucketKind: "hour" },
+  { id: "1w",     label: "Last week",     source: "pg",  windowDay: 7,  bucketKind: "hour" },
+  { id: "1mo",    label: "Last month",    source: "pg",  windowDay: 30, bucketKind: "day"  },
+  { id: "custom", label: "Custom date",   source: "pg",                 bucketKind: "hour" },
+];
+
+function isoNoZ(d) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
 export default function InverterDetailsPage() {
   const { id: inverterId } = useParams();
   const [tab, setTab] = useState("overview");
+  const [chartRange, setChartRange] = useState("10m");
+  const [customDate, setCustomDate] = useState(() =>
+    new Date().toISOString().split("T")[0]
+  );
 
   // Memoize so the queryKey stays stable across renders (only changes at midnight).
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
@@ -131,15 +149,116 @@ export default function InverterDetailsPage() {
   const hasFault = bitmask > 0;
   const status = computeStatus(merged);
 
+  const currentRange = CHART_RANGES.find((r) => r.id === chartRange) || CHART_RANGES[0];
+
+  // Compute start/end for the power-generation query (1d / 1w / 1mo / custom)
+  const pgRangeStart = useMemo(() => {
+    if (currentRange.source !== "pg") return null;
+    if (chartRange === "custom") return `${customDate}T00:00:00`;
+    const now = new Date();
+    const past = new Date(now);
+    if (currentRange.windowHr) past.setHours(past.getHours() - currentRange.windowHr);
+    else if (currentRange.windowDay) past.setDate(past.getDate() - currentRange.windowDay);
+    return isoNoZ(past);
+  }, [chartRange, customDate, currentRange]);
+
+  const pgRangeEnd = useMemo(() => {
+    if (chartRange === "custom") return `${customDate}T23:59:59`;
+    return null;
+  }, [chartRange, customDate]);
+
+  const { data: chartPgData, isLoading: chartPgLoading } = useQuery({
+    queryKey: ["chartPg", inverterId, chartRange, pgRangeStart, pgRangeEnd],
+    queryFn: () =>
+      getData(
+        `/inverter/power-generation/?inverter=${inverterId}` +
+          `&start=${pgRangeStart}` +
+          (pgRangeEnd ? `&end=${pgRangeEnd}` : "") +
+          `&ordering=measurement_time&limit=5000`
+      ),
+    enabled: !!inverterId && !!pgRangeStart,
+    refetchInterval: 5 * 60 * 1000,
+    staleTime: 2 * 60 * 1000,
+  });
+
+  // Build the chart series — aggregation per the spec for each range:
+  //  10m → raw 5s samples, 1h → per-minute averages,
+  //  1d/1w/custom → per hour, 1mo → per day (aggregated from hourly buckets).
   const chartData = useMemo(() => {
-    return generationData
-      .slice(0, 60)
-      .reverse()
-      .map((d) => ({
-        time: format(new Date(d.timestamp), "HH:mm:ss"),
-        power: parseFloat(d.power_out || 0),
+    if (currentRange.source === "raw") {
+      const cutoff = Date.now() - currentRange.windowMin * 60 * 1000;
+      const filtered = generationData
+        .filter((d) => new Date(d.timestamp).getTime() >= cutoff)
+        .map((d) => ({
+          t: new Date(d.timestamp).getTime(),
+          power: parseFloat(d.power_out || 0),
+        }))
+        .sort((a, b) => a.t - b.t);
+
+      if (!currentRange.bucketSec) {
+        // 10m view — raw samples, every reading is its own point.
+        return filtered.map((d) => ({
+          time: format(new Date(d.t), "HH:mm:ss"),
+          power: d.power,
+        }));
+      }
+      // 1h view — group into 1-minute buckets and average power.
+      const ms = currentRange.bucketSec * 1000;
+      const buckets = new Map();
+      filtered.forEach(({ t, power }) => {
+        const key = Math.floor(t / ms) * ms;
+        if (!buckets.has(key)) buckets.set(key, { t: key, sum: 0, count: 0 });
+        const b = buckets.get(key);
+        b.sum += power;
+        b.count += 1;
+      });
+      return [...buckets.values()]
+        .sort((a, b) => a.t - b.t)
+        .map((b) => ({
+          time: format(new Date(b.t), "HH:mm"),
+          power: b.sum / b.count,
+        }));
+    }
+
+    // Source: /power-generation/ (already hourly buckets server-side).
+    const records = chartPgData?.results || [];
+    if (currentRange.bucketKind === "hour") {
+      // 1d / 1w / custom — each hourly bucket is its own chart point.
+      return records
+        .map((r) => ({
+          t: new Date(r.measurement_time).getTime(),
+          time: format(new Date(r.measurement_time), "dd/MM HH:mm"),
+          power: parseFloat(r.avg_power || 0),
+          energy: parseFloat(r.energy_generated || 0),
+        }))
+        .sort((a, b) => a.t - b.t);
+    }
+    // 1mo — aggregate the hourly buckets into per-day chart points.
+    const byDay = new Map();
+    records.forEach((r) => {
+      const d = new Date(r.measurement_time);
+      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+      const dayStart = new Date(d);
+      dayStart.setHours(0, 0, 0, 0);
+      if (!byDay.has(key))
+        byDay.set(key, { t: dayStart.getTime(), powerSum: 0, count: 0, energy: 0 });
+      const b = byDay.get(key);
+      b.powerSum += parseFloat(r.avg_power || 0);
+      b.count += 1;
+      b.energy += parseFloat(r.energy_generated || 0);
+    });
+    return [...byDay.values()]
+      .sort((a, b) => a.t - b.t)
+      .map((b) => ({
+        time: format(new Date(b.t), "dd/MM"),
+        power: b.count ? b.powerSum / b.count : 0,
+        energy: b.energy,
       }));
-  }, [generationData]);
+  }, [currentRange, generationData, chartPgData]);
+
+  const yUnit = currentRange.source === "pg" ? " W avg" : " W";
+  const needsScroll = chartData.length > 80;
+  const scrollWidth = needsScroll ? Math.max(800, chartData.length * 14) : 0;
 
   // Sum hourly buckets returned by /power-generation/ for today.
   const dailyEnergyKwh = useMemo(() => {
@@ -334,26 +453,134 @@ export default function InverterDetailsPage() {
                 </section>
 
                 <section className="bg-white rounded-xl border border-slate-200 p-5 mb-4">
-                  <h3 className="text-base font-bold text-slate-900 mb-1">Generation Trend</h3>
-                  <p className="text-xs text-slate-500 mb-4">Last {chartData.length} samples (newest on the right)</p>
-                  <div style={{ width: "100%", height: 320 }}>
-                    <ResponsiveContainer>
-                      <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                        <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} />
-                        <YAxis domain={[0, "auto"]} tick={{ fontSize: 10, fill: "#6B7280" }} unit=" W" />
-                        <Tooltip />
-                        <Line
-                          type="monotone"
-                          dataKey="power"
-                          stroke="#E97451"
-                          strokeWidth={2.5}
-                          dot={{ r: 3, stroke: "#E97451", strokeWidth: 2, fill: "#fff" }}
-                          activeDot={{ r: 5 }}
+                  {/* Header: title on the left, range tabs on the top-right */}
+                  <div className="flex items-start justify-between flex-wrap gap-3 mb-4">
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900">Generation Trend</h3>
+                      <p className="text-xs text-slate-500">
+                        {chartData.length} data points ·{" "}
+                        {currentRange.source === "raw" && !currentRange.bucketSec
+                          ? "raw telemetry (5-second precision)"
+                          : currentRange.source === "raw"
+                          ? "per-minute average"
+                          : currentRange.bucketKind === "day"
+                          ? "per-day average"
+                          : "per-hour average from backend"}
+                      </p>
+                      {chartRange === "custom" && (
+                        <input
+                          type="date"
+                          value={customDate}
+                          max={todayStr}
+                          onChange={(e) => setCustomDate(e.target.value)}
+                          className="mt-2 border border-slate-200 rounded-lg px-3 py-1.5 text-xs bg-white hover:border-orange-400 outline-none"
                         />
-                      </LineChart>
-                    </ResponsiveContainer>
+                      )}
+                    </div>
+                    <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
+                      {CHART_RANGES.map((r) => (
+                        <button
+                          key={r.id}
+                          onClick={() => setChartRange(r.id)}
+                          className={`text-xs px-3 py-1.5 rounded-md font-semibold whitespace-nowrap ${
+                            chartRange === r.id
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-500 hover:text-slate-700"
+                          }`}
+                        >
+                          {r.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
+
+                  {/* Chart — horizontally scrollable only when there's too much data for one view */}
+                  {chartPgLoading ? (
+                    <div className="h-72 flex items-center justify-center text-sm text-slate-400">
+                      <RefreshCw size={20} className="animate-spin mr-2" /> Loading…
+                    </div>
+                  ) : chartData.length === 0 ? (
+                    <div className="h-72 flex items-center justify-center text-sm text-slate-400">
+                      No data in this range yet.
+                    </div>
+                  ) : needsScroll ? (
+                    // Two-chart pattern: sticky Y-axis on the left, only the
+                    // plot area scrolls. The Y-axis chart is layered above
+                    // the scroll container so its labels never move.
+                    <div className="relative" style={{ height: 420 }}>
+                      {/* Sticky Y-axis layer */}
+                      <div
+                        className="absolute top-0 left-0 z-10 pointer-events-none bg-white"
+                        style={{ width: 70, height: 420 }}
+                      >
+                        <LineChart
+                          width={70}
+                          height={420}
+                          data={chartData}
+                          margin={{ top: 10, right: 0, left: 5, bottom: 30 }}
+                        >
+                          <YAxis
+                            domain={[0, "auto"]}
+                            tick={{ fontSize: 10, fill: "#6B7280" }}
+                            unit={yUnit}
+                          />
+                          <Line dataKey="power" stroke="transparent" dot={false} />
+                        </LineChart>
+                      </div>
+
+                      {/* Scrollable plot area — Y-axis is rendered invisibly so
+                          the data chart's left margin matches the sticky Y-axis. */}
+                      <div className="overflow-x-auto scrollbar-thin" style={{ height: 420 }}>
+                        <LineChart
+                          width={scrollWidth}
+                          height={420}
+                          data={chartData}
+                          margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                          <XAxis
+                            dataKey="time"
+                            tick={{ fontSize: 10, fill: "#6B7280" }}
+                            interval={Math.max(0, Math.floor(chartData.length / 30))}
+                          />
+                          <YAxis
+                            domain={[0, "auto"]}
+                            tick={false}
+                            axisLine={false}
+                            width={70}
+                          />
+                          <Tooltip />
+                          <Line
+                            type="monotone"
+                            dataKey="power"
+                            stroke="#E97451"
+                            strokeWidth={2.5}
+                            dot={{ r: 2, stroke: "#E97451", strokeWidth: 1.5, fill: "#fff" }}
+                            activeDot={{ r: 5 }}
+                          />
+                        </LineChart>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={{ width: "100%", height: 420 }}>
+                      <ResponsiveContainer>
+                        <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                          <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={20} />
+                          <YAxis domain={[0, "auto"]} tick={{ fontSize: 10, fill: "#6B7280" }} unit={yUnit} width={70} />
+                          <Tooltip />
+                          <Line
+                            type="monotone"
+                            dataKey="power"
+                            stroke="#E97451"
+                            strokeWidth={2.5}
+                            dot={{ r: 3, stroke: "#E97451", strokeWidth: 2, fill: "#fff" }}
+                            activeDot={{ r: 5 }}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
                 </section>
 
                 <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">

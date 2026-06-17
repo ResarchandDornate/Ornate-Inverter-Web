@@ -26,7 +26,6 @@ export default function Sidebar() {
   const router = useRouter();
 
   const handleLogout = () => {
-    if (!confirm("Sign out of Ornate Inverter Monitor?")) return;
     clearToken();
     showSuccess("Signed out");
     router.replace("/login");

@@ -70,10 +70,10 @@ export default function SignUpPage() {
   );
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-8 bg-slate-50">
+    <div className="min-h-screen flex items-center justify-center px-4 py-8 bg-gradient-to-br from-orange-100 via-rose-100 to-amber-100">
       <form
         onSubmit={onSubmit}
-        className="w-full max-w-lg bg-white rounded-3xl p-8 shadow-xl"
+        className="w-full max-w-lg bg-white rounded-3xl p-8 shadow-2xl"
       >
         <div className="flex justify-center mb-4">
           {/* eslint-disable-next-line @next/next/no-img-element */}

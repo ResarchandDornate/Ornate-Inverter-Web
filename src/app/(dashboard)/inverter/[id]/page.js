@@ -85,6 +85,25 @@ export default function InverterDetailsPage() {
       }));
   }, [generationData]);
 
+  // Compute daily energy: each reading covers ~10 s interval, power is in W
+  // Energy (kWh) = Power (W) × 10s / 3600s/h / 1000
+  const dailyEnergyKwh = useMemo(() => {
+    return generationData.reduce(
+      (sum, d) => sum + parseFloat(d.power || 0) * 10 / 3600 / 1000,
+      0
+    );
+  }, [generationData]);
+
+  const peakPowerW = useMemo(() => {
+    if (!generationData.length) return 0;
+    return Math.max(...generationData.map((d) => parseFloat(d.power || 0)));
+  }, [generationData]);
+
+  const avgPowerW = useMemo(() => {
+    if (!generationData.length) return 0;
+    return generationData.reduce((s, d) => s + parseFloat(d.power || 0), 0) / generationData.length;
+  }, [generationData]);
+
   return (
     <>
       <Topbar
@@ -232,6 +251,25 @@ export default function InverterDetailsPage() {
 
             {tab === "generation" && (
               <>
+                {/* Daily summary stats */}
+                <section className="grid grid-cols-3 gap-3 mb-4">
+                  <div className="bg-white rounded-xl border border-slate-200 p-4">
+                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Daily Energy</p>
+                    <p className="text-2xl font-bold text-blue-600">{dailyEnergyKwh.toFixed(3)}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">kWh generated today</p>
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-4">
+                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Peak Power</p>
+                    <p className="text-2xl font-bold text-orange-600">{peakPowerW.toFixed(0)}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">W maximum output</p>
+                  </div>
+                  <div className="bg-white rounded-xl border border-slate-200 p-4">
+                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Avg Power</p>
+                    <p className="text-2xl font-bold text-slate-700">{avgPowerW.toFixed(0)}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">W average · {generationData.length} readings</p>
+                  </div>
+                </section>
+
                 <section className="bg-white rounded-xl border border-slate-200 p-5 mb-4">
                   <h3 className="text-base font-bold text-slate-900 mb-1">Generation Trend</h3>
                   <p className="text-xs text-slate-500 mb-4">Last {chartData.length} samples (newest on the right)</p>

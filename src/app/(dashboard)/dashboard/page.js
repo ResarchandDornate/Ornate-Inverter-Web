@@ -1,19 +1,16 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import {
   Zap,
-  Sun,
   BatteryCharging,
   AlertTriangle,
   ArrowUpRight,
   Activity,
 } from "lucide-react";
 import {
-  LineChart,
-  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -28,17 +25,23 @@ import Topbar from "@/components/Topbar";
 import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
 
+const MAX_LIVE_SAMPLES = 30; // ~5 minutes of data at 10s polling
+
 export default function DashboardPage() {
   const { data: inverterData } = useQuery({
     queryKey: QUERY_KEYS.INVERTERS,
     queryFn: () => getData("/inverter/inverters/"),
     refetchInterval: 10000,
   });
-  const { data: summaryData } = useQuery({
+  const { data: summaryData, dataUpdatedAt: summaryUpdatedAt } = useQuery({
     queryKey: QUERY_KEYS.USER_SUMMARY,
     queryFn: () => getData("/inverter/power-generation/user-summary/"),
     refetchInterval: 10000,
   });
+
+  // Rolling live chart — accumulate snapshots of total power + online count
+  // every time the summary query refetches. Kept on the client only.
+  const [liveSeries, setLiveSeries] = useState([]);
 
   const invertersList = useMemo(
     () => inverterData?.results || (Array.isArray(inverterData) ? inverterData : []),
@@ -55,14 +58,22 @@ export default function DashboardPage() {
   const totalPower = summaryData?.total_power_w ?? 0;
   const totalEnergy = summaryData?.total_energy_kwh ?? 0;
   const faultCount = inverters.filter((i) => (i.fault_bitmask ?? 0) > 0).length;
+  const totalInverters = inverters.length;
 
-  // Mock 24h trend so the chart looks alive even if backend doesn't return one.
-  const mockTrend = useMemo(() => {
-    return Array.from({ length: 24 }, (_, i) => ({
-      hour: `${String(i).padStart(2, "0")}:00`,
-      power: Math.round(Math.sin(((i - 6) / 12) * Math.PI) * 2400 + Math.random() * 300),
-    })).map((d) => ({ ...d, power: Math.max(d.power, 0) }));
-  }, []);
+  useEffect(() => {
+    if (!summaryUpdatedAt) return;
+    const point = {
+      time: new Date(summaryUpdatedAt).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }),
+      power: Number(summaryData?.total_power_w ?? 0),
+      online: onlineCount,
+    };
+    setLiveSeries((prev) => [...prev.slice(-(MAX_LIVE_SAMPLES - 1)), point]);
+  }, [summaryUpdatedAt, summaryData, onlineCount]);
 
   return (
     <>
@@ -104,48 +115,75 @@ export default function DashboardPage() {
         {/* Main grid: chart (2/3) + activity feed (1/3) */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
           <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
               <div>
-                <h2 className="text-base font-bold text-slate-900">Generation — Today</h2>
-                <p className="text-xs text-slate-500">Aggregate power across all inverters (W)</p>
+                <h2 className="text-base font-bold text-slate-900">Live Generation</h2>
+                <p className="text-xs text-slate-500">
+                  Aggregate power (W) · {onlineCount} of {totalInverters} inverters online
+                </p>
               </div>
-              <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-                {["24h", "7d", "30d"].map((range, i) => (
-                  <button
-                    key={range}
-                    className={`text-xs px-3 py-1 rounded-md font-semibold ${
-                      i === 0
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-500 hover:text-slate-700"
-                    }`}
-                  >
-                    {range}
-                  </button>
-                ))}
+              <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-green-50 border border-green-100">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                <span className="text-[10px] font-bold text-green-700 uppercase tracking-widest">
+                  Live · {liveSeries.length} samples
+                </span>
               </div>
             </div>
             <div style={{ width: "100%", height: 260 }}>
-              <ResponsiveContainer>
-                <AreaChart data={mockTrend} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="powerGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#E97451" stopOpacity={0.4} />
-                      <stop offset="95%" stopColor="#E97451" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                  <XAxis dataKey="hour" tick={{ fontSize: 10, fill: "#6B7280" }} />
-                  <YAxis tick={{ fontSize: 10, fill: "#6B7280" }} unit=" W" />
-                  <Tooltip />
-                  <Area
-                    type="monotone"
-                    dataKey="power"
-                    stroke="#E97451"
-                    strokeWidth={2.5}
-                    fill="url(#powerGradient)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
+              {liveSeries.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-sm text-slate-400">
+                  Waiting for first sample…
+                </div>
+              ) : (
+                <ResponsiveContainer>
+                  <AreaChart data={liveSeries} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="powerGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#E97451" stopOpacity={0.4} />
+                        <stop offset="95%" stopColor="#E97451" stopOpacity={0} />
+                      </linearGradient>
+                      <linearGradient id="onlineGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10B981" stopOpacity={0.3} />
+                        <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                    <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={20} />
+                    <YAxis
+                      yAxisId="power"
+                      tick={{ fontSize: 10, fill: "#6B7280" }}
+                      unit=" W"
+                      domain={[0, "auto"]}
+                    />
+                    <YAxis
+                      yAxisId="online"
+                      orientation="right"
+                      tick={{ fontSize: 10, fill: "#10B981" }}
+                      domain={[0, totalInverters || 1]}
+                      allowDecimals={false}
+                    />
+                    <Tooltip />
+                    <Area
+                      yAxisId="power"
+                      type="monotone"
+                      dataKey="power"
+                      name="Power (W)"
+                      stroke="#E97451"
+                      strokeWidth={2.5}
+                      fill="url(#powerGradient)"
+                    />
+                    <Area
+                      yAxisId="online"
+                      type="stepAfter"
+                      dataKey="online"
+                      name="Online inverters"
+                      stroke="#10B981"
+                      strokeWidth={2}
+                      fill="url(#onlineGradient)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
             </div>
           </div>
 
@@ -231,10 +269,10 @@ export default function DashboardPage() {
                       <td className="px-5 py-3 text-slate-500 font-mono text-xs">{inv.serial_number}</td>
                       <td className="px-5 py-3"><StatusBadge status={status} /></td>
                       <td className="px-5 py-3 text-right text-slate-700">
-                        {Number(inv.power_w ?? inv.current_power ?? 0).toFixed(0)} W
+                        {Number(inv.power_w ?? inv.current_power_w ?? inv.current_power ?? inv.power ?? 0).toFixed(0)} W
                       </td>
                       <td className="px-5 py-3 text-right text-slate-700">
-                        {Number(inv.energy_kwh ?? 0).toFixed(2)} kWh
+                        {Number(inv.energy_kwh ?? inv.daily_energy_kwh ?? inv.total_energy_kwh ?? inv.energy_today ?? inv.total_energy ?? 0).toFixed(3)} kWh
                       </td>
                       <td className="px-5 py-3 text-right">
                         {bitmask > 0 ? (

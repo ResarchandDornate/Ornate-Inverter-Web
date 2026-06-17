@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
-import { Search, RefreshCw, Filter, Plus } from "lucide-react";
+import { Search, RefreshCw, Plus } from "lucide-react";
 import { getData } from "@/lib/api";
 import { QUERY_KEYS } from "@/lib/queryKeys";
 import Topbar from "@/components/Topbar";
@@ -130,10 +130,10 @@ export default function InvertersListPage() {
                       <td className="px-5 py-3.5 text-slate-700 text-sm">{inv.city || "—"}</td>
                       <td className="px-5 py-3.5"><StatusBadge status={status} /></td>
                       <td className="px-5 py-3.5 text-right text-slate-700">
-                        {Number(inv.power_w ?? inv.current_power ?? 0).toFixed(0)} W
+                        {Number(inv.power_w ?? inv.current_power_w ?? inv.current_power ?? inv.power ?? 0).toFixed(0)} W
                       </td>
                       <td className="px-5 py-3.5 text-right text-slate-700 font-semibold">
-                        {Number(inv.energy_kwh ?? 0).toFixed(2)}
+                        {Number(inv.energy_kwh ?? inv.daily_energy_kwh ?? inv.total_energy_kwh ?? inv.energy_today ?? inv.total_energy ?? 0).toFixed(3)}
                       </td>
                       <td className="px-5 py-3.5 text-right">
                         {bitmask > 0 ? (

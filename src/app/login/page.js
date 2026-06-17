@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import { Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { postData } from "@/lib/api";
 import { setToken } from "@/lib/auth";
@@ -47,13 +46,11 @@ export default function LoginPage() {
         className="w-full max-w-md bg-white rounded-3xl p-8 shadow-xl"
       >
         <div className="flex flex-col items-center mb-8">
-          <Image
-            src="/ornatelogo.png"
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/icon.png"
             alt="Ornate Solar"
-            width={120}
-            height={60}
-            className="mb-4 object-contain"
-            priority
+            className="mb-4 h-14 w-auto object-contain"
           />
           <h1 className="text-3xl font-bold text-slate-800">Welcome Back</h1>
           <p className="text-slate-500 mt-2">Sign in to continue</p>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Search, Bell, ChevronDown, User } from "lucide-react";
+import { Search, ChevronDown, User } from "lucide-react";
 
 export default function Topbar({ title, breadcrumbs = [] }) {
   const [search, setSearch] = useState("");
@@ -40,11 +40,6 @@ export default function Topbar({ title, breadcrumbs = [] }) {
               /
             </kbd>
           </div>
-
-          <button className="relative p-2 rounded-lg hover:bg-slate-100 text-slate-500 hover:text-slate-700 transition">
-            <Bell size={18} />
-            <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full" />
-          </button>
 
           <button className="flex items-center gap-2 pl-2 pr-3 py-1.5 rounded-lg hover:bg-slate-100 transition">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-orange-500 to-red-600 flex items-center justify-center">

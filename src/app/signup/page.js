@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import Image from "next/image";
 import { Loader2 } from "lucide-react";
 import { postData } from "@/lib/api";
 import { showSuccess, showError, extractApiMessage } from "@/lib/toast";
@@ -77,13 +76,11 @@ export default function SignUpPage() {
         className="w-full max-w-lg bg-white rounded-3xl p-8 shadow-xl"
       >
         <div className="flex justify-center mb-4">
-          <Image
-            src="/ornatelogo.png"
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/icon.png"
             alt="Ornate Solar"
-            width={120}
-            height={60}
-            className="object-contain"
-            priority
+            className="h-14 w-auto object-contain"
           />
         </div>
         <h1 className="text-2xl font-bold text-slate-800 mb-1">Create Account</h1>

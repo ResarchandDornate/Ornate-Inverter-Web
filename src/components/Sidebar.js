@@ -1,13 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import Image from "next/image";
 import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   Zap,
   BarChart3,
-  ActivitySquare,
   Settings,
   LogOut,
   Bell,
@@ -37,16 +35,13 @@ export default function Sidebar() {
   return (
     <aside className="hidden md:flex w-64 shrink-0 bg-slate-900 text-slate-300 flex-col h-screen sticky top-0">
       {/* Brand */}
-      <div className="px-6 py-5 border-b border-slate-800 flex items-center gap-3">
-        <div className="w-10 h-10 rounded-lg bg-white flex items-center justify-center overflow-hidden shrink-0">
-          <Image
-            src="/ornatelogo.png"
-            alt="Ornate Solar"
-            width={32}
-            height={32}
-            className="object-contain"
-          />
-        </div>
+      <div className="px-5 py-5 border-b border-slate-800 flex items-center gap-3">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/icon.png"
+          alt="Ornate Solar"
+          className="h-9 w-auto object-contain shrink-0"
+        />
         <div className="min-w-0">
           <p className="text-white font-bold text-sm leading-tight">Ornate Solar</p>
           <p className="text-[10px] text-slate-400 uppercase tracking-widest">

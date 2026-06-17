@@ -3,16 +3,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { getData } from "@/lib/api";
 
-// One hook for every dashboard page. Fetches:
-//   1) GET /api/inverter/inverters/                                        → metadata for every inverter
-//   2) GET /api/inverter/inverter-data/?inverter=ID&ordering=-timestamp&limit=1  → latest telemetry
+// One hook for every dashboard page.
 //
-// We use `/inverter-data/` rather than `/inverters/<id>/status/` because the
-// docs spell out the inverter-data response shape exactly — `grid_connected`,
-// `power_out`, `fault_bitmask`, etc. — while `/status/`'s shape isn't documented
-// and was silently returning errors (which our catch flagged as "offline").
-//
-// Re-fetches every 10 seconds so every page that uses it stays live.
+// CRITICAL: when merging the latest telemetry record into the inverter object,
+// we MUST NOT spread the record's `id` over the inverter's `id`. The two are
+// different identifiers:
+//   - inv.id   = inverter id (e.g. 2125)        — used in /inverters/<id>/, links, queries
+//   - latest.id = record id  (e.g. 138828)      — only useful for the data row itself
+// Spreading them together would make every Open link go to /inverter/138828
+// and every subsequent query hit `?inverter=138828`, which 400s.
 export function useLiveInverters() {
   return useQuery({
     queryKey: ["liveInverters"],
@@ -30,10 +29,26 @@ export function useLiveInverters() {
             const latest = (dataRes?.results || [])[0];
 
             if (!latest) {
-              // No telemetry rows for this inverter yet.
               return { ...inv, grid_connected: null, _noData: true };
             }
-            return { ...inv, ...latest, _noData: false };
+
+            // Explicitly pick the telemetry fields only — DO NOT spread `latest`
+            // wholesale (would overwrite inv.id with the record id).
+            return {
+              ...inv,
+              voltage: latest.voltage,
+              current: latest.current,
+              power_in: latest.power_in,
+              power_out: latest.power_out,
+              vpv: latest.vpv,
+              ipv: latest.ipv,
+              delta: latest.delta,
+              fault_bitmask: latest.fault_bitmask,
+              temperature: latest.temperature,
+              grid_connected: latest.grid_connected,
+              last_telemetry_at: latest.timestamp,
+              _noData: false,
+            };
           } catch (err) {
             console.warn(`[useLiveInverters] failed for inverter ${inv.id}:`, err?.message);
             return { ...inv, grid_connected: null, _error: err?.message };

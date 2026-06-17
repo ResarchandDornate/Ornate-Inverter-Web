@@ -31,6 +31,7 @@ import { QUERY_KEYS } from "@/lib/queryKeys";
 import Topbar from "@/components/Topbar";
 import StatusBadge from "@/components/StatusBadge";
 import StatusCard from "@/components/StatusCard";
+import { computeStatus, formatLastSeen } from "@/lib/inverterStatus";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -52,15 +53,18 @@ export default function InverterDetailsPage() {
   } = useQuery({
     queryKey: QUERY_KEYS.INVERTER_DETAILS(inverterId),
     queryFn: async () => {
+      // limit=120 ≈ 10 minutes of 5-second samples — enough for the chart
+      // and table, much lighter than the previous 500.
       const response = await getData(
-        `/inverter/inverter-data/?inverter=${inverterId}&ordering=-timestamp&limit=500`
+        `/inverter/inverter-data/?inverter=${inverterId}&ordering=-timestamp&limit=120`
       );
       const data = response.results || (Array.isArray(response) ? response : []);
       data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       return data;
     },
     enabled: !!inverterId,
-    refetchInterval: 10000,
+    refetchInterval: 15000,
+    staleTime: 10000,
   });
 
   // Real daily energy from backend hourly aggregates (accurate; survives
@@ -74,16 +78,33 @@ export default function InverterDetailsPage() {
       ),
     enabled: !!inverterId,
     refetchInterval: 60000,
+    staleTime: 30000,
+  });
+
+  // Status endpoint /grid_status/ gives us authoritative status + last_seen.
+  const { data: gridStatusData } = useQuery({
+    queryKey: ["inverterGridStatus", inverterId],
+    queryFn: () => getData(`/inverter/inverters/${inverterId}/grid_status/`),
+    enabled: !!inverterId,
+    refetchInterval: 15000,
+    staleTime: 10000,
   });
 
   const generationData = inverterHistory || [];
   const latestReading = generationData[0] || {};
-  // grid_connected comes from the latest telemetry record itself — no separate endpoint.
-  const gridConnected = latestReading.grid_connected ?? null;
+  // Merge status endpoint with latest telemetry record for one unified shape.
+  const merged = {
+    ...latestReading,
+    status: gridStatusData?.status,
+    is_online: gridStatusData?.is_online,
+    last_seen: gridStatusData?.last_seen,
+    grid_connected: gridStatusData?.grid_connected ?? latestReading.grid_connected,
+  };
+  const gridConnected = merged.grid_connected ?? null;
   const offline = gridConnected === false;
   const bitmask = Number(latestReading.fault_bitmask ?? 0);
   const hasFault = bitmask > 0;
-  const status = hasFault ? "fault" : gridConnected ? "online" : gridConnected === false ? "offline" : "unknown";
+  const status = computeStatus(merged);
 
   const chartData = useMemo(() => {
     return generationData
@@ -113,11 +134,6 @@ export default function InverterDetailsPage() {
     );
   }, [hourlyEnergyData]);
 
-  const peakPowerW = useMemo(() => {
-    if (!generationData.length) return 0;
-    return Math.max(...generationData.map((d) => parseFloat(d.power_out || 0)));
-  }, [generationData]);
-
   const avgPowerW = useMemo(() => {
     if (!generationData.length) return 0;
     return generationData.reduce((s, d) => s + parseFloat(d.power_out || 0), 0) / generationData.length;
@@ -145,6 +161,9 @@ export default function InverterDetailsPage() {
               <h2 className="text-xl font-bold text-slate-900 mt-0.5">
                 {offline ? "0" : parseFloat(latestReading.power_out || 0).toFixed(0)} <span className="text-sm text-slate-400 font-normal">W output</span>
               </h2>
+              <p className="text-[11px] text-slate-400 mt-1">
+                Last seen {formatLastSeen(gridStatusData?.last_seen)}
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
@@ -321,11 +340,11 @@ export default function InverterDetailsPage() {
                     <table className="w-full text-sm">
                       <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500 sticky top-0">
                         <tr>
-                          <th className="text-left px-5 py-3 font-semibold">Time</th>
-                          <th className="text-right px-5 py-3 font-semibold">Voltage (V)</th>
-                          <th className="text-right px-5 py-3 font-semibold">Current (A)</th>
-                          <th className="text-right px-5 py-3 font-semibold">Power Out (W)</th>
-                          <th className="text-right px-5 py-3 font-semibold">Temp (°C)</th>
+                          <th className="text-center px-5 py-3 font-semibold">Time</th>
+                          <th className="text-center px-5 py-3 font-semibold">Voltage (V)</th>
+                          <th className="text-center px-5 py-3 font-semibold">Current (A)</th>
+                          <th className="text-center px-5 py-3 font-semibold">Power Out (W)</th>
+                          <th className="text-center px-5 py-3 font-semibold">Temp (°C)</th>
                         </tr>
                       </thead>
                       <tbody>

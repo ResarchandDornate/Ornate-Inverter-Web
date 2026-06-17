@@ -17,7 +17,9 @@ import { Zap, Activity, TrendingUp, Calendar, BatteryCharging, Thermometer } fro
 import { getData } from "@/lib/api";
 import Topbar from "@/components/Topbar";
 import KpiCard from "@/components/KpiCard";
+import StatusBadge from "@/components/StatusBadge";
 import { useLiveInverters } from "@/hooks/useLiveInverters";
+import { computeStatus, formatLastSeen } from "@/lib/inverterStatus";
 
 export default function AnalyticsPage() {
   const todayStr = new Date().toISOString().split("T")[0];
@@ -179,7 +181,7 @@ export default function AnalyticsPage() {
                     contentStyle={{ fontSize: 12, borderRadius: 8 }}
                   />
                   <Bar dataKey="energy" radius={[4, 4, 0, 0]} maxBarSize={42}>
-                    {hourlyChart.map((d, i) => (
+                    {hourlyChart.map((_, i) => (
                       <Cell key={i} fill="#E97451" opacity={Math.max(0.6, 1 - (hourlyChart.length - 1 - i) * 0.02)} />
                     ))}
                   </Bar>
@@ -202,13 +204,13 @@ export default function AnalyticsPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500">
                 <tr>
-                  <th className="text-left px-5 py-3 font-semibold">Inverter</th>
-                  <th className="text-right px-5 py-3 font-semibold">Energy (kWh)</th>
-                  <th className="text-right px-5 py-3 font-semibold">Peak Avg Power</th>
-                  <th className="text-right px-5 py-3 font-semibold">Live Power Out</th>
-                  <th className="text-right px-5 py-3 font-semibold">Voltage</th>
-                  <th className="text-right px-5 py-3 font-semibold">Temp</th>
-                  <th className="text-right px-5 py-3 font-semibold">Status</th>
+                  <th className="text-center px-5 py-3 font-semibold">Inverter</th>
+                  <th className="text-center px-5 py-3 font-semibold">Energy (kWh)</th>
+                  <th className="text-center px-5 py-3 font-semibold">Peak Avg Power</th>
+                  <th className="text-center px-5 py-3 font-semibold">Live Power Out</th>
+                  <th className="text-center px-5 py-3 font-semibold">Voltage</th>
+                  <th className="text-center px-5 py-3 font-semibold">Temp</th>
+                  <th className="text-center px-5 py-3 font-semibold">Status</th>
                 </tr>
               </thead>
               <tbody>
@@ -216,41 +218,33 @@ export default function AnalyticsPage() {
                   .sort((a, b) => (perInverterAgg[b.id]?.energy ?? 0) - (perInverterAgg[a.id]?.energy ?? 0))
                   .map((inv) => {
                     const agg = perInverterAgg[inv.id] || { energy: 0, peakAvgPower: 0 };
-                    const online = inv.grid_connected === true;
+                    const status = computeStatus(inv);
                     return (
                       <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50">
                         <td className="px-5 py-3 font-semibold text-slate-900">
                           {inv.name}
                           <p className="text-xs text-slate-400 font-normal font-mono">{inv.serial_number}</p>
+                          <p className="text-[10px] text-slate-400 font-normal mt-0.5">
+                            {formatLastSeen(inv.last_seen)}
+                          </p>
                         </td>
-                        <td className="px-5 py-3 text-right font-semibold text-blue-600">
+                        <td className="px-5 py-3 text-center font-semibold text-blue-600">
                           {agg.energy.toFixed(3)}
                         </td>
-                        <td className="px-5 py-3 text-right text-slate-700">
+                        <td className="px-5 py-3 text-center text-slate-700">
                           {agg.peakAvgPower.toFixed(0)} W
                         </td>
-                        <td className="px-5 py-3 text-right font-semibold text-orange-600">
+                        <td className="px-5 py-3 text-center font-semibold text-orange-600">
                           {Number(inv.power_out ?? 0).toFixed(0)} W
                         </td>
-                        <td className="px-5 py-3 text-right text-slate-700">
+                        <td className="px-5 py-3 text-center text-slate-700">
                           {inv.voltage != null ? `${Number(inv.voltage).toFixed(1)} V` : "—"}
                         </td>
-                        <td className="px-5 py-3 text-right text-slate-700">
+                        <td className="px-5 py-3 text-center text-slate-700">
                           {inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—"}
                         </td>
-                        <td className="px-5 py-3 text-right">
-                          <span
-                            className={`inline-block w-1.5 h-1.5 rounded-full mr-1 ${
-                              online ? "bg-green-500" : inv.grid_connected === false ? "bg-red-500" : "bg-slate-400"
-                            }`}
-                          />
-                          <span
-                            className={`text-xs font-semibold ${
-                              online ? "text-green-700" : inv.grid_connected === false ? "text-red-700" : "text-slate-600"
-                            }`}
-                          >
-                            {online ? "Online" : inv.grid_connected === false ? "Offline" : "Unknown"}
-                          </span>
+                        <td className="px-5 py-3 text-center">
+                          <StatusBadge status={status} />
                         </td>
                       </tr>
                     );

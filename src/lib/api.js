@@ -33,6 +33,24 @@ axiosInstance.interceptors.request.use((config) => {
   return config;
 });
 
+// Auto-retry on HTTP 429 (rate limit). Honors the Retry-After header if the
+// backend sends one; otherwise backs off ~2s. Retries at most twice so a
+// genuinely overloaded server doesn't get hammered further.
+axiosInstance.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    const cfg = error.config || {};
+    if (error.response?.status === 429 && (cfg._retryCount ?? 0) < 2) {
+      cfg._retryCount = (cfg._retryCount ?? 0) + 1;
+      const retryAfterHeader = error.response.headers?.["retry-after"];
+      const waitSec = retryAfterHeader ? Number(retryAfterHeader) || 2 : 2;
+      await new Promise((r) => setTimeout(r, waitSec * 1000));
+      return axiosInstance.request(cfg);
+    }
+    return Promise.reject(error);
+  }
+);
+
 // Some backend endpoints return HTTP 200 with `{ success: false, message: "..." }`
 // in the body for logical failures. Treat that as an error.
 const enforceSuccessFlag = (data) => {

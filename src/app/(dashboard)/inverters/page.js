@@ -6,6 +6,7 @@ import { Search, RefreshCw, Plus } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import StatusBadge from "@/components/StatusBadge";
 import { useLiveInverters } from "@/hooks/useLiveInverters";
+import { computeStatus, formatLastSeen } from "@/lib/inverterStatus";
 
 export default function InvertersListPage() {
   const [search, setSearch] = useState("");
@@ -15,9 +16,10 @@ export default function InvertersListPage() {
 
   const filtered = useMemo(() => {
     let arr = inverters;
-    if (filter === "online") arr = arr.filter((i) => i.grid_connected === true);
-    if (filter === "offline") arr = arr.filter((i) => i.grid_connected === false);
-    if (filter === "faults") arr = arr.filter((i) => Number(i.fault_bitmask ?? 0) > 0);
+    if (filter === "online") arr = arr.filter((i) => computeStatus(i) === "online");
+    if (filter === "offline") arr = arr.filter((i) => computeStatus(i) === "offline");
+    if (filter === "idle") arr = arr.filter((i) => computeStatus(i) === "idle");
+    if (filter === "faults") arr = arr.filter((i) => computeStatus(i) === "fault");
 
     if (search) {
       const q = search.toLowerCase();
@@ -49,7 +51,7 @@ export default function InvertersListPage() {
           </div>
 
           <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-            {["all", "online", "offline", "faults"].map((f) => (
+            {["all", "online", "idle", "offline", "faults"].map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -83,28 +85,22 @@ export default function InvertersListPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider">
                 <tr>
-                  <th className="text-left px-5 py-3 font-semibold">Inverter</th>
-                  <th className="text-left px-5 py-3 font-semibold">Serial No.</th>
-                  <th className="text-left px-5 py-3 font-semibold">Model</th>
-                  <th className="text-left px-5 py-3 font-semibold">Status</th>
-                  <th className="text-right px-5 py-3 font-semibold">Power Out (W)</th>
-                  <th className="text-right px-5 py-3 font-semibold">Voltage</th>
-                  <th className="text-right px-5 py-3 font-semibold">Temp</th>
-                  <th className="text-right px-5 py-3 font-semibold">Faults</th>
+                  <th className="text-center px-5 py-3 font-semibold">Inverter</th>
+                  <th className="text-center px-5 py-3 font-semibold">Serial No.</th>
+                  <th className="text-center px-5 py-3 font-semibold">Model</th>
+                  <th className="text-center px-5 py-3 font-semibold">Status</th>
+                  <th className="text-center px-5 py-3 font-semibold">Last Seen</th>
+                  <th className="text-center px-5 py-3 font-semibold">Power Out (W)</th>
+                  <th className="text-center px-5 py-3 font-semibold">Voltage</th>
+                  <th className="text-center px-5 py-3 font-semibold">Temp</th>
+                  <th className="text-center px-5 py-3 font-semibold">Faults</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((inv) => {
                   const bitmask = Number(inv.fault_bitmask ?? 0);
-                  const status =
-                    bitmask > 0
-                      ? "fault"
-                      : inv.grid_connected === true
-                      ? "online"
-                      : inv.grid_connected === false
-                      ? "offline"
-                      : "unknown";
+                  const status = computeStatus(inv);
                   return (
                     <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
                       <td className="px-5 py-3.5">
@@ -116,7 +112,10 @@ export default function InvertersListPage() {
                       <td className="px-5 py-3.5 text-slate-600 font-mono text-xs">{inv.serial_number}</td>
                       <td className="px-5 py-3.5 text-slate-700 text-xs">{inv.model || "—"}</td>
                       <td className="px-5 py-3.5"><StatusBadge status={status} /></td>
-                      <td className="px-5 py-3.5 text-right text-slate-700 font-semibold">
+                      <td className="px-5 py-3.5 text-center text-slate-500 text-xs">
+                        {formatLastSeen(inv.last_seen)}
+                      </td>
+                      <td className="px-5 py-3.5 text-center text-slate-700 font-semibold">
                         {Number(inv.power_out ?? 0).toFixed(0)}
                       </td>
                       <td className="px-5 py-3.5 text-right text-slate-700">
@@ -147,7 +146,7 @@ export default function InvertersListPage() {
                 })}
                 {!filtered.length && (
                   <tr>
-                    <td colSpan={9} className="text-center text-slate-400 py-12 text-sm">
+                    <td colSpan={10} className="text-center text-slate-400 py-12 text-sm">
                       No inverters match your filter.
                     </td>
                   </tr>

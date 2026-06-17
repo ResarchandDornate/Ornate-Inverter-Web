@@ -27,6 +27,7 @@ import Topbar from "@/components/Topbar";
 import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
 import { useLiveInverters } from "@/hooks/useLiveInverters";
+import { computeStatus } from "@/lib/inverterStatus";
 
 const MAX_LIVE_SAMPLES = 30; // ~5 min @ 10s polling
 
@@ -37,13 +38,17 @@ const RANGES = [
   { id: "30d", label: "Last 30 days" },
 ];
 
-// Returns ISO string for the start of the requested range.
+// Returns a naive ISO 8601 datetime string `YYYY-MM-DDTHH:mm:ss` (no ms, no Z)
+// because the backend's documented filter format is the naive form. The
+// timezone-suffixed form (`...Z`) was returning empty results.
 function getStartIso(range) {
   const now = Date.now();
   const map = { "24h": 24 * 3600, "7d": 7 * 86400, "30d": 30 * 86400 };
   const secs = map[range];
   if (!secs) return null;
-  return new Date(now - secs * 1000).toISOString();
+  const d = new Date(now - secs * 1000);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 export default function DashboardPage() {
@@ -103,7 +108,7 @@ export default function DashboardPage() {
   }, [historicalSeed, seeded]);
 
   const totalInverters = inverters.length;
-  const onlineCount = inverters.filter((i) => i.grid_connected === true).length;
+  const onlineCount = inverters.filter((i) => i.is_online === true || i.status === "online").length;
   const totalPower = inverters.reduce(
     (s, i) => s + Number(i.power_out ?? 0),
     0
@@ -147,14 +152,21 @@ export default function DashboardPage() {
     0
   );
 
-  // Historical aggregates from /power-generation/ (for the chart range tabs)
+  // Historical aggregates from /power-generation/ (for the chart range tabs).
+  //
+  // Two important params here:
+  //   - start: naive datetime (no Z) — the documented format the API accepts.
+  //   - limit: 5000 because 30 days × 24h × N inverters can blow past the
+  //     default of 100 and silently truncate the chart.
   const startIso = getStartIso(range);
-  const { data: pgData, isLoading: pgLoading } = useQuery({
+  const { data: pgData, isLoading: pgLoading, error: pgError } = useQuery({
     queryKey: ["powerGenerationRange", range, startIso],
-    queryFn: () =>
-      getData(
-        `/inverter/power-generation/?start=${startIso}&ordering=measurement_time`
-      ),
+    queryFn: async () => {
+      const res = await getData(
+        `/inverter/power-generation/?start=${startIso}&ordering=measurement_time&limit=5000`
+      );
+      return res;
+    },
     enabled: range !== "live" && !!startIso,
     refetchInterval: 60000,
   });
@@ -335,6 +347,12 @@ export default function DashboardPage() {
                   <div className="h-8 w-8 animate-spin rounded-full border-2 border-orange-500 border-t-transparent mb-3" />
                   Loading aggregates…
                 </div>
+              ) : pgError ? (
+                <div className="flex flex-col items-center justify-center h-full text-sm text-red-500 px-6 text-center">
+                  <AlertTriangle size={20} className="mb-2" />
+                  <p className="font-semibold">Couldn&apos;t load aggregates</p>
+                  <p className="text-xs text-slate-500 mt-1">{pgError.message}</p>
+                </div>
               ) : historicalChart.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-sm text-slate-400">
                   No energy data in this range yet.
@@ -438,26 +456,19 @@ export default function DashboardPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider">
                 <tr>
-                  <th className="text-left px-5 py-3 font-semibold">Name</th>
-                  <th className="text-left px-5 py-3 font-semibold">Serial</th>
-                  <th className="text-left px-5 py-3 font-semibold">Status</th>
-                  <th className="text-right px-5 py-3 font-semibold">Power Out</th>
-                  <th className="text-right px-5 py-3 font-semibold">Temp</th>
-                  <th className="text-right px-5 py-3 font-semibold">Faults</th>
+                  <th className="text-center px-5 py-3 font-semibold">Name</th>
+                  <th className="text-center px-5 py-3 font-semibold">Serial</th>
+                  <th className="text-center px-5 py-3 font-semibold">Status</th>
+                  <th className="text-center px-5 py-3 font-semibold">Power Out</th>
+                  <th className="text-center px-5 py-3 font-semibold">Temp</th>
+                  <th className="text-center px-5 py-3 font-semibold">Faults</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
                 {inverters.slice(0, 6).map((inv) => {
                   const bitmask = Number(inv.fault_bitmask ?? 0);
-                  const status =
-                    bitmask > 0
-                      ? "fault"
-                      : inv.grid_connected === true
-                      ? "online"
-                      : inv.grid_connected === false
-                      ? "offline"
-                      : "unknown";
+                  const status = computeStatus(inv);
                   return (
                     <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
                       <td className="px-5 py-3 font-semibold text-slate-900">{inv.name}</td>

@@ -4,7 +4,8 @@ export default function StatusBadge({ status }) {
   const map = {
     online: { dot: "bg-green-500", text: "text-green-700", bg: "bg-green-50", label: "Online" },
     offline: { dot: "bg-red-500", text: "text-red-700", bg: "bg-red-50", label: "Offline" },
-    fault: { dot: "bg-amber-500", text: "text-amber-700", bg: "bg-amber-50", label: "Fault" },
+    idle: { dot: "bg-amber-500", text: "text-amber-700", bg: "bg-amber-50", label: "Idle" },
+    fault: { dot: "bg-orange-500", text: "text-orange-700", bg: "bg-orange-50", label: "Fault" },
     unknown: { dot: "bg-slate-400", text: "text-slate-600", bg: "bg-slate-100", label: "Unknown" },
   };
   const s = map[status] || map.unknown;

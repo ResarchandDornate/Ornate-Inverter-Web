@@ -63,6 +63,19 @@ export default function InverterDetailsPage() {
     refetchInterval: 10000,
   });
 
+  // Real daily energy from backend hourly aggregates (accurate; survives
+  // missed polls/page reloads instead of being a client-side integration).
+  const todayStr = new Date().toISOString().split("T")[0];
+  const { data: hourlyEnergyData } = useQuery({
+    queryKey: ["inverterDailyEnergy", inverterId, todayStr],
+    queryFn: () =>
+      getData(
+        `/inverter/power-generation/?inverter=${inverterId}&start=${todayStr}T00:00:00&end=${todayStr}T23:59:59&ordering=measurement_time`
+      ),
+    enabled: !!inverterId,
+    refetchInterval: 60000,
+  });
+
   const generationData = inverterHistory || [];
   const latestReading = generationData[0] || {};
   // grid_connected comes from the latest telemetry record itself — no separate endpoint.
@@ -82,14 +95,23 @@ export default function InverterDetailsPage() {
       }));
   }, [generationData]);
 
-  // Daily energy: ESP32 publishes every 5s per API docs.
-  // Energy (kWh) = Power (W) × 5s / 3600s/h / 1000
+  // Sum hourly buckets returned by /power-generation/ for today.
   const dailyEnergyKwh = useMemo(() => {
-    return generationData.reduce(
-      (sum, d) => sum + parseFloat(d.power_out || 0) * 5 / 3600 / 1000,
+    const buckets = hourlyEnergyData?.results || [];
+    return buckets.reduce(
+      (sum, b) => sum + parseFloat(b.energy_generated || 0),
       0
     );
-  }, [generationData]);
+  }, [hourlyEnergyData]);
+
+  // Peak hourly avg_power from backend (more meaningful than instantaneous peak).
+  const peakHourPowerW = useMemo(() => {
+    const buckets = hourlyEnergyData?.results || [];
+    return buckets.reduce(
+      (max, b) => Math.max(max, parseFloat(b.avg_power || 0)),
+      0
+    );
+  }, [hourlyEnergyData]);
 
   const peakPowerW = useMemo(() => {
     if (!generationData.length) return 0;
@@ -256,9 +278,9 @@ export default function InverterDetailsPage() {
                     <p className="text-xs text-slate-400 mt-0.5">kWh generated today</p>
                   </div>
                   <div className="bg-white rounded-xl border border-slate-200 p-4">
-                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Peak Power</p>
-                    <p className="text-2xl font-bold text-orange-600">{peakPowerW.toFixed(0)}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">W maximum output</p>
+                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Peak Hour</p>
+                    <p className="text-2xl font-bold text-orange-600">{peakHourPowerW.toFixed(0)}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">W hourly avg max</p>
                   </div>
                   <div className="bg-white rounded-xl border border-slate-200 p-4">
                     <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Avg Power</p>

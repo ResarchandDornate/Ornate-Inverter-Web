@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useQuery } from "@tanstack/react-query";
 import {
   Zap,
   BatteryCharging,
@@ -17,7 +18,11 @@ import {
   ResponsiveContainer,
   Area,
   AreaChart,
+  BarChart,
+  Bar,
+  Cell,
 } from "recharts";
+import { getData } from "@/lib/api";
 import Topbar from "@/components/Topbar";
 import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
@@ -25,12 +30,29 @@ import { useLiveInverters } from "@/hooks/useLiveInverters";
 
 const MAX_LIVE_SAMPLES = 30; // ~5 min @ 10s polling
 
+const RANGES = [
+  { id: "live", label: "Live" },
+  { id: "24h", label: "Last 24h" },
+  { id: "7d", label: "Last 7 days" },
+  { id: "30d", label: "Last 30 days" },
+];
+
+// Returns ISO string for the start of the requested range.
+function getStartIso(range) {
+  const now = Date.now();
+  const map = { "24h": 24 * 3600, "7d": 7 * 86400, "30d": 30 * 86400 };
+  const secs = map[range];
+  if (!secs) return null;
+  return new Date(now - secs * 1000).toISOString();
+}
+
 export default function DashboardPage() {
   const { data: inverters = [], dataUpdatedAt } = useLiveInverters();
   const [liveSeries, setLiveSeries] = useState([]);
+  const [range, setRange] = useState("live");
 
   const totalInverters = inverters.length;
-  const onlineCount = inverters.filter((i) => i.grid_connected).length;
+  const onlineCount = inverters.filter((i) => i.grid_connected === true).length;
   const totalPower = inverters.reduce(
     (s, i) => s + Number(i.power_out ?? 0),
     0
@@ -42,6 +64,7 @@ export default function DashboardPage() {
     return valid.reduce((s, i) => s + Number(i.temperature), 0) / valid.length;
   }, [inverters]);
 
+  // Accumulate live samples for the rolling 5-min chart
   useEffect(() => {
     if (!dataUpdatedAt || inverters.length === 0) return;
     const point = {
@@ -57,6 +80,47 @@ export default function DashboardPage() {
     setLiveSeries((prev) => [...prev.slice(-(MAX_LIVE_SAMPLES - 1)), point]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataUpdatedAt]);
+
+  // Historical aggregates from /power-generation/
+  const startIso = getStartIso(range);
+  const { data: pgData, isLoading: pgLoading } = useQuery({
+    queryKey: ["powerGenerationRange", range, startIso],
+    queryFn: () =>
+      getData(
+        `/inverter/power-generation/?start=${startIso}&ordering=measurement_time`
+      ),
+    enabled: range !== "live" && !!startIso,
+    refetchInterval: 60000,
+  });
+
+  // Group hourly records by hour (24h view) or day (7d / 30d view).
+  // Sum across all inverters per bucket.
+  const historicalChart = useMemo(() => {
+    if (range === "live") return [];
+    const records = pgData?.results || [];
+    const byKey = {};
+    records.forEach((r) => {
+      const d = new Date(r.measurement_time);
+      let key, label;
+      if (range === "24h") {
+        key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}`;
+        label = `${String(d.getHours()).padStart(2, "0")}:00`;
+      } else {
+        key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+        label = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+      }
+      if (!byKey[key]) byKey[key] = { key, label, sortKey: d.getTime(), energy: 0, avgPower: 0, count: 0 };
+      byKey[key].energy += parseFloat(r.energy_generated || 0);
+      byKey[key].avgPower += parseFloat(r.avg_power || 0);
+      byKey[key].count += 1;
+    });
+    return Object.values(byKey)
+      .map((b) => ({ ...b, avgPower: b.count ? b.avgPower / b.count : 0 }))
+      .sort((a, b) => a.sortKey - b.sortKey);
+  }, [pgData, range]);
+
+  const rangeTotalEnergy = historicalChart.reduce((s, b) => s + b.energy, 0);
+  const rangePeakPower = historicalChart.reduce((m, b) => Math.max(m, b.avgPower), 0);
 
   return (
     <>
@@ -95,73 +159,144 @@ export default function DashboardPage() {
         {/* Main grid */}
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
           <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 p-5">
-            <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+            {/* Chart header with range tabs */}
+            <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
               <div>
-                <h2 className="text-base font-bold text-slate-900">Live Generation</h2>
+                <h2 className="text-base font-bold text-slate-900">
+                  {range === "live" ? "Live Generation" : "Historical Generation"}
+                </h2>
                 <p className="text-xs text-slate-500">
-                  Aggregate AC power output (W) · {onlineCount} of {totalInverters} inverters online
+                  {range === "live"
+                    ? `Aggregate AC power (W) · ${onlineCount} of ${totalInverters} inverters online`
+                    : range === "24h"
+                    ? `Energy generated per hour (kWh) · last 24 hours`
+                    : `Energy generated per day (kWh) · last ${range === "7d" ? "7" : "30"} days`}
                 </p>
               </div>
-              <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-green-50 border border-green-100">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                <span className="text-[10px] font-bold text-green-700 uppercase tracking-widest">
-                  Live · {liveSeries.length} samples
-                </span>
+              <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+                {RANGES.map((r) => (
+                  <button
+                    key={r.id}
+                    onClick={() => setRange(r.id)}
+                    className={`text-xs px-3 py-1.5 rounded-md font-semibold whitespace-nowrap ${
+                      range === r.id
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
+                  >
+                    {r.label}
+                  </button>
+                ))}
               </div>
             </div>
-            <div style={{ width: "100%", height: 260 }}>
-              {liveSeries.length === 0 ? (
+
+            {/* Summary strip — totals for the selected range */}
+            {range !== "live" && historicalChart.length > 0 && (
+              <div className="grid grid-cols-3 gap-3 mb-4">
+                <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Energy</p>
+                  <p className="text-lg font-black text-blue-600">
+                    {rangeTotalEnergy.toFixed(2)} <span className="text-xs font-medium text-slate-400">kWh</span>
+                  </p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Peak Avg Power</p>
+                  <p className="text-lg font-black text-orange-600">
+                    {rangePeakPower.toFixed(0)} <span className="text-xs font-medium text-slate-400">W</span>
+                  </p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Buckets</p>
+                  <p className="text-lg font-black text-slate-700">
+                    {historicalChart.length}{" "}
+                    <span className="text-xs font-medium text-slate-400">
+                      {range === "24h" ? "hours" : "days"}
+                    </span>
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Chart */}
+            <div style={{ width: "100%", height: 280 }}>
+              {range === "live" ? (
+                liveSeries.length < 2 ? (
+                  <div className="flex flex-col items-center justify-center h-full text-sm text-slate-400">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-orange-500 border-t-transparent mb-3" />
+                    Collecting samples… ({liveSeries.length} / {MAX_LIVE_SAMPLES})
+                  </div>
+                ) : (
+                  <ResponsiveContainer>
+                    <AreaChart data={liveSeries} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="powerGradient" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#E97451" stopOpacity={0.5} />
+                          <stop offset="95%" stopColor="#E97451" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                      <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={30} />
+                      <YAxis
+                        tick={{ fontSize: 11, fill: "#6B7280" }}
+                        unit=" W"
+                        domain={[0, "auto"]}
+                        width={70}
+                      />
+                      <Tooltip
+                        formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
+                        contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                      />
+                      <Area
+                        type="monotone"
+                        dataKey="power"
+                        name="Power"
+                        stroke="#E97451"
+                        strokeWidth={2.5}
+                        fill="url(#powerGradient)"
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                )
+              ) : pgLoading ? (
+                <div className="flex flex-col items-center justify-center h-full text-sm text-slate-400">
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-orange-500 border-t-transparent mb-3" />
+                  Loading aggregates…
+                </div>
+              ) : historicalChart.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-sm text-slate-400">
-                  Waiting for first sample…
+                  No energy data in this range yet.
                 </div>
               ) : (
                 <ResponsiveContainer>
-                  <AreaChart data={liveSeries} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="powerGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#E97451" stopOpacity={0.4} />
-                        <stop offset="95%" stopColor="#E97451" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="onlineGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#10B981" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#10B981" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
+                  <BarChart data={historicalChart} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                    <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={20} />
-                    <YAxis
-                      yAxisId="power"
+                    <XAxis
+                      dataKey="label"
                       tick={{ fontSize: 10, fill: "#6B7280" }}
-                      unit=" W"
-                      domain={[0, "auto"]}
+                      interval={range === "30d" ? "preserveStartEnd" : 0}
+                      angle={range === "30d" ? -30 : 0}
+                      textAnchor={range === "30d" ? "end" : "middle"}
+                      height={range === "30d" ? 50 : 30}
                     />
                     <YAxis
-                      yAxisId="online"
-                      orientation="right"
-                      tick={{ fontSize: 10, fill: "#10B981" }}
-                      domain={[0, totalInverters || 1]}
-                      allowDecimals={false}
+                      tick={{ fontSize: 11, fill: "#6B7280" }}
+                      unit=" kWh"
+                      width={70}
                     />
-                    <Tooltip />
-                    <Area
-                      yAxisId="power"
-                      type="monotone"
-                      dataKey="power"
-                      name="Power (W)"
-                      stroke="#E97451"
-                      strokeWidth={2.5}
-                      fill="url(#powerGradient)"
+                    <Tooltip
+                      formatter={(v, name) => {
+                        if (name === "energy") return [`${Number(v).toFixed(3)} kWh`, "Energy"];
+                        return [`${Number(v).toFixed(0)} W`, "Avg Power"];
+                      }}
+                      labelFormatter={(l) => `${range === "24h" ? "Hour" : "Day"}: ${l}`}
+                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
                     />
-                    <Area
-                      yAxisId="online"
-                      type="stepAfter"
-                      dataKey="online"
-                      name="Online inverters"
-                      stroke="#10B981"
-                      strokeWidth={2}
-                      fill="url(#onlineGradient)"
-                    />
-                  </AreaChart>
+                    <Bar dataKey="energy" name="energy" radius={[4, 4, 0, 0]} maxBarSize={40}>
+                      {historicalChart.map((_, i) => (
+                        <Cell key={i} fill="#E97451" opacity={0.7 + (i / historicalChart.length) * 0.3} />
+                      ))}
+                    </Bar>
+                  </BarChart>
                 </ResponsiveContainer>
               )}
             </div>

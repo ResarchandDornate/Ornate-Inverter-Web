@@ -55,18 +55,35 @@ export default function InverterDetailsPage() {
   } = useQuery({
     queryKey: [...QUERY_KEYS.INVERTER_DETAILS(inverterId), todayStr],
     queryFn: async () => {
-      // All of today's readings (filtered by start=midnight). Bumped polling
-      // to 30s because the payload is much larger than the previous limit=120.
-      const response = await getData(
-        `/inverter/inverter-data/?inverter=${inverterId}&start=${todayStr}T00:00:00&ordering=-timestamp&limit=5000`
-      );
-      const data = response.results || (Array.isArray(response) ? response : []);
-      data.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-      return data;
+      // The backend caps each response at ~100 records regardless of limit=.
+      // We paginate through up to MAX_PAGES pages sequentially (gentle on
+      // the rate limit) to get all of today's readings.
+      const MAX_PAGES = 20; // 20 × 100 = up to 2000 records (~2.8h of 5s samples)
+      const allData = [];
+      const baseUrl =
+        `/inverter/inverter-data/?inverter=${inverterId}` +
+        `&start=${todayStr}T00:00:00&ordering=-timestamp`;
+
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const url = page === 1 ? baseUrl : `${baseUrl}&page=${page}`;
+        let response;
+        try {
+          response = await getData(url);
+        } catch {
+          break; // 404 once we run out of pages
+        }
+        const results = response?.results || [];
+        if (results.length === 0) break;
+        allData.push(...results);
+        if (!response.next) break;
+      }
+
+      allData.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+      return allData;
     },
     enabled: !!inverterId,
-    refetchInterval: 30000,
-    staleTime: 25000,
+    refetchInterval: 60000,
+    staleTime: 50000,
   });
 
   // Real daily energy from backend hourly aggregates (accurate; survives
@@ -361,13 +378,13 @@ export default function InverterDetailsPage() {
                             key={item.id || index}
                             className="border-b border-slate-100 hover:bg-slate-50"
                           >
-                            <td className="px-5 py-2.5 text-slate-700 font-mono text-xs">
+                            <td className="px-5 py-2.5 text-center text-slate-700 font-mono text-xs">
                               {format(new Date(item.timestamp), "HH:mm:ss")}
                             </td>
-                            <td className="px-5 py-2.5 text-right text-slate-700">{parseFloat(item.voltage).toFixed(1)}</td>
-                            <td className="px-5 py-2.5 text-right text-slate-700">{parseFloat(item.current).toFixed(2)}</td>
-                            <td className="px-5 py-2.5 text-right font-semibold text-orange-600">{parseFloat(item.power_out).toFixed(0)}</td>
-                            <td className="px-5 py-2.5 text-right text-slate-700">{item.temperature ?? "—"}</td>
+                            <td className="px-5 py-2.5 text-center text-slate-700">{parseFloat(item.voltage).toFixed(1)}</td>
+                            <td className="px-5 py-2.5 text-center text-slate-700">{parseFloat(item.current).toFixed(2)}</td>
+                            <td className="px-5 py-2.5 text-center font-semibold text-orange-600">{parseFloat(item.power_out).toFixed(0)}</td>
+                            <td className="px-5 py-2.5 text-center text-slate-700">{item.temperature ?? "—"}</td>
                           </tr>
                         ))}
                       </tbody>

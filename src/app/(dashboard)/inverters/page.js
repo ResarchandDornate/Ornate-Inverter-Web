@@ -118,13 +118,13 @@ export default function InvertersListPage() {
                       <td className="px-5 py-3.5 text-center text-slate-700 font-semibold">
                         {Number(inv.power_out ?? 0).toFixed(0)}
                       </td>
-                      <td className="px-5 py-3.5 text-right text-slate-700">
+                      <td className="px-5 py-3.5 text-center text-slate-700">
                         {inv.voltage != null ? `${Number(inv.voltage).toFixed(1)} V` : "—"}
                       </td>
-                      <td className="px-5 py-3.5 text-right text-slate-700">
+                      <td className="px-5 py-3.5 text-center text-slate-700">
                         {inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—"}
                       </td>
-                      <td className="px-5 py-3.5 text-right">
+                      <td className="px-5 py-3.5 text-center">
                         {bitmask > 0 ? (
                           <span className="text-xs font-mono font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded">
                             0x{bitmask.toString(16).toUpperCase()}
@@ -133,7 +133,7 @@ export default function InvertersListPage() {
                           <span className="text-xs text-slate-300">—</span>
                         )}
                       </td>
-                      <td className="px-5 py-3.5 text-right">
+                      <td className="px-5 py-3.5 text-center">
                         <Link
                           href={`/inverter/${inv.id}`}
                           className="text-xs font-semibold text-orange-600 hover:underline"

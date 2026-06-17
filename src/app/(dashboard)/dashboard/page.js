@@ -475,20 +475,20 @@ export default function DashboardPage() {
                       <td className="px-5 py-3 font-semibold text-slate-900">{inv.name}</td>
                       <td className="px-5 py-3 text-slate-500 font-mono text-xs">{inv.serial_number}</td>
                       <td className="px-5 py-3"><StatusBadge status={status} /></td>
-                      <td className="px-5 py-3 text-right text-slate-700">
+                      <td className="px-5 py-3 text-center text-slate-700">
                         {Number(inv.power_out ?? 0).toFixed(0)} W
                       </td>
-                      <td className="px-5 py-3 text-right text-slate-700">
+                      <td className="px-5 py-3 text-center text-slate-700">
                         {inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—"}
                       </td>
-                      <td className="px-5 py-3 text-right">
+                      <td className="px-5 py-3 text-center">
                         {bitmask > 0 ? (
                           <span className="text-xs font-semibold text-red-600">0x{bitmask.toString(16).toUpperCase()}</span>
                         ) : (
                           <span className="text-xs text-slate-400">—</span>
                         )}
                       </td>
-                      <td className="px-5 py-3 text-right">
+                      <td className="px-5 py-3 text-center">
                         <Link
                           href={`/inverter/${inv.id}`}
                           className="text-xs font-semibold text-orange-600 hover:underline"

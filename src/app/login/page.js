@@ -24,9 +24,25 @@ export default function LoginPage() {
     setLoading(true);
     try {
       const res = await postData("/auth/signin/", { email, password });
-      // Per API docs: response is { access, refresh, user } at the top level.
-      const token = res?.access || res?.data?.access;
-      if (!token) throw new Error("No access token received");
+      // The backend's signin response shape has shifted in the past — check
+      // every known location so we don't get "No access token received" just
+      // because someone added a `data` wrapper on the server.
+      const token =
+        res?.access ||
+        res?.access_token ||
+        res?.token ||
+        res?.data?.access ||
+        res?.data?.access_token ||
+        res?.data?.token ||
+        res?.data?.tokens?.access;
+
+      if (!token) {
+        // Surface the actual shape so we can see what the server returned.
+        console.error("[Login] Unexpected signin response shape:", res);
+        throw new Error(
+          "Login response is missing the access token. Check the network tab → signin/ response."
+        );
+      }
 
       setToken(token);
       showSuccess("Welcome back!");

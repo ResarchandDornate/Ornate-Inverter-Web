@@ -242,7 +242,14 @@ export default function DashboardPage() {
               <tbody>
                 {inverters.slice(0, 6).map((inv) => {
                   const bitmask = Number(inv.fault_bitmask ?? 0);
-                  const status = bitmask > 0 ? "fault" : inv.grid_connected ? "online" : "offline";
+                  const status =
+                    bitmask > 0
+                      ? "fault"
+                      : inv.grid_connected === true
+                      ? "online"
+                      : inv.grid_connected === false
+                      ? "offline"
+                      : "unknown";
                   return (
                     <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
                       <td className="px-5 py-3 font-semibold text-slate-900">{inv.name}</td>

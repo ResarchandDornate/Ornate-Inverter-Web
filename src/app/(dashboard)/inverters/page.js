@@ -15,8 +15,8 @@ export default function InvertersListPage() {
 
   const filtered = useMemo(() => {
     let arr = inverters;
-    if (filter === "online") arr = arr.filter((i) => i.grid_connected);
-    if (filter === "offline") arr = arr.filter((i) => !i.grid_connected);
+    if (filter === "online") arr = arr.filter((i) => i.grid_connected === true);
+    if (filter === "offline") arr = arr.filter((i) => i.grid_connected === false);
     if (filter === "faults") arr = arr.filter((i) => Number(i.fault_bitmask ?? 0) > 0);
 
     if (search) {
@@ -97,7 +97,14 @@ export default function InvertersListPage() {
               <tbody>
                 {filtered.map((inv) => {
                   const bitmask = Number(inv.fault_bitmask ?? 0);
-                  const status = bitmask > 0 ? "fault" : inv.grid_connected ? "online" : "offline";
+                  const status =
+                    bitmask > 0
+                      ? "fault"
+                      : inv.grid_connected === true
+                      ? "online"
+                      : inv.grid_connected === false
+                      ? "offline"
+                      : "unknown";
                   return (
                     <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
                       <td className="px-5 py-3.5">

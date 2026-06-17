@@ -4,10 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { getData } from "@/lib/api";
 
 // One hook for every dashboard page. Fetches:
-//   1) GET /api/inverter/inverters/         → metadata for every inverter
-//   2) GET /api/inverter/inverters/<id>/status/  → latest telemetry per inverter
+//   1) GET /api/inverter/inverters/                                        → metadata for every inverter
+//   2) GET /api/inverter/inverter-data/?inverter=ID&ordering=-timestamp&limit=1  → latest telemetry
 //
-// Returns a flat array of { ...metadata, ...latestTelemetry } objects.
+// We use `/inverter-data/` rather than `/inverters/<id>/status/` because the
+// docs spell out the inverter-data response shape exactly — `grid_connected`,
+// `power_out`, `fault_bitmask`, etc. — while `/status/`'s shape isn't documented
+// and was silently returning errors (which our catch flagged as "offline").
+//
 // Re-fetches every 10 seconds so every page that uses it stays live.
 export function useLiveInverters() {
   return useQuery({
@@ -20,11 +24,19 @@ export function useLiveInverters() {
       const enriched = await Promise.all(
         list.map(async (inv) => {
           try {
-            const status = await getData(`/inverter/inverters/${inv.id}/status/`);
-            return { ...inv, ...status };
-          } catch {
-            // Inverter is unreachable — keep metadata, flag offline.
-            return { ...inv, grid_connected: false };
+            const dataRes = await getData(
+              `/inverter/inverter-data/?inverter=${inv.id}&ordering=-timestamp&limit=1`
+            );
+            const latest = (dataRes?.results || [])[0];
+
+            if (!latest) {
+              // No telemetry rows for this inverter yet.
+              return { ...inv, grid_connected: null, _noData: true };
+            }
+            return { ...inv, ...latest, _noData: false };
+          } catch (err) {
+            console.warn(`[useLiveInverters] failed for inverter ${inv.id}:`, err?.message);
+            return { ...inv, grid_connected: null, _error: err?.message };
           }
         })
       );

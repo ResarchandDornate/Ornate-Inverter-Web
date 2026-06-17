@@ -49,7 +49,58 @@ function getStartIso(range) {
 export default function DashboardPage() {
   const { data: inverters = [], dataUpdatedAt } = useLiveInverters();
   const [liveSeries, setLiveSeries] = useState([]);
+  const [seeded, setSeeded] = useState(false);
   const [range, setRange] = useState("live");
+
+  // Pre-seed the Live chart with the last 5 minutes of real history so the
+  // chart appears populated immediately instead of waiting for 30 polls.
+  const { data: historicalSeed } = useQuery({
+    queryKey: ["liveChartSeed"],
+    queryFn: async () => {
+      const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      const res = await getData(
+        `/inverter/inverter-data/?start=${fiveMinAgo}&ordering=timestamp&limit=500`
+      );
+      return res?.results || [];
+    },
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+  });
+
+  useEffect(() => {
+    if (seeded || !historicalSeed) return;
+    if (historicalSeed.length === 0) {
+      setSeeded(true);
+      return;
+    }
+    // Bucket records into 10-second windows, summing power_out across inverters
+    const buckets = new Map();
+    historicalSeed.forEach((r) => {
+      const t = new Date(r.timestamp).getTime();
+      const bucketKey = Math.floor(t / 10000) * 10000;
+      if (!buckets.has(bucketKey)) {
+        buckets.set(bucketKey, {
+          time: new Date(bucketKey).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+            hour12: false,
+          }),
+          power: 0,
+          online: 0,
+        });
+      }
+      const b = buckets.get(bucketKey);
+      b.power += parseFloat(r.power_out || 0);
+      if (r.grid_connected) b.online += 1;
+    });
+    const sorted = [...buckets.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, b]) => b)
+      .slice(-MAX_LIVE_SAMPLES);
+    setLiveSeries(sorted);
+    setSeeded(true);
+  }, [historicalSeed, seeded]);
 
   const totalInverters = inverters.length;
   const onlineCount = inverters.filter((i) => i.grid_connected === true).length;
@@ -220,10 +271,10 @@ export default function DashboardPage() {
             {/* Chart */}
             <div style={{ width: "100%", height: 280 }}>
               {range === "live" ? (
-                liveSeries.length < 2 ? (
+                !seeded || liveSeries.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full text-sm text-slate-400">
                     <div className="h-8 w-8 animate-spin rounded-full border-2 border-orange-500 border-t-transparent mb-3" />
-                    Collecting samples… ({liveSeries.length} / {MAX_LIVE_SAMPLES})
+                    {seeded ? "Waiting for first sample…" : "Loading recent history…"}
                   </div>
                 ) : (
                   <ResponsiveContainer>

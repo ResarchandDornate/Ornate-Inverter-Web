@@ -132,7 +132,22 @@ export default function DashboardPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dataUpdatedAt]);
 
-  // Historical aggregates from /power-generation/
+  // Today's total energy across all inverters — for the KPI card.
+  const todayStr = new Date().toISOString().split("T")[0];
+  const { data: todayPgData } = useQuery({
+    queryKey: ["dashboardTodayEnergy", todayStr],
+    queryFn: () =>
+      getData(
+        `/inverter/power-generation/?start=${todayStr}T00:00:00&end=${todayStr}T23:59:59&ordering=measurement_time`
+      ),
+    refetchInterval: 60000,
+  });
+  const todayEnergyTotal = (todayPgData?.results || []).reduce(
+    (s, r) => s + parseFloat(r.energy_generated || 0),
+    0
+  );
+
+  // Historical aggregates from /power-generation/ (for the chart range tabs)
   const startIso = getStartIso(range);
   const { data: pgData, isLoading: pgLoading } = useQuery({
     queryKey: ["powerGenerationRange", range, startIso],
@@ -178,7 +193,7 @@ export default function DashboardPage() {
       <Topbar title="Dashboard" breadcrumbs={["Overview", "Dashboard"]} />
       <main className="flex-1 px-6 py-6 max-w-[1600px] w-full">
         {/* KPI Row */}
-        <section className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        <section className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
           <KpiCard
             label="Inverters Online"
             value={`${onlineCount}/${totalInverters}`}
@@ -191,6 +206,13 @@ export default function DashboardPage() {
             unit="W"
             icon={Zap}
             accent="orange"
+          />
+          <KpiCard
+            label="Today's Energy"
+            value={todayEnergyTotal.toFixed(2)}
+            unit="kWh"
+            icon={BatteryCharging}
+            accent="indigo"
           />
           <KpiCard
             label="Avg Temperature"

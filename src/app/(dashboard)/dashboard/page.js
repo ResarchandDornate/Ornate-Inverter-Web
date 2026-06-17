@@ -138,14 +138,16 @@ export default function DashboardPage() {
   }, [dataUpdatedAt]);
 
   // Today's total energy across all inverters — for the KPI card.
-  const todayStr = new Date().toISOString().split("T")[0];
+  // Memoize so the queryKey stays stable across renders (only changes at midnight).
+  const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
   const { data: todayPgData } = useQuery({
     queryKey: ["dashboardTodayEnergy", todayStr],
     queryFn: () =>
       getData(
         `/inverter/power-generation/?start=${todayStr}T00:00:00&end=${todayStr}T23:59:59&ordering=measurement_time`
       ),
-    refetchInterval: 60000,
+    refetchInterval: 5 * 60 * 1000,
+    staleTime: 2 * 60 * 1000,
   });
   const todayEnergyTotal = (todayPgData?.results || []).reduce(
     (s, r) => s + parseFloat(r.energy_generated || 0),
@@ -154,21 +156,20 @@ export default function DashboardPage() {
 
   // Historical aggregates from /power-generation/ (for the chart range tabs).
   //
-  // Two important params here:
-  //   - start: naive datetime (no Z) — the documented format the API accepts.
-  //   - limit: 5000 because 30 days × 24h × N inverters can blow past the
-  //     default of 100 and silently truncate the chart.
-  const startIso = getStartIso(range);
+  // CRITICAL: getStartIso() calls Date.now() — if called inline each render
+  // the seconds component changes the queryKey on every re-render, which makes
+  // TanStack Query treat it as a fresh query and re-fire the request. That
+  // loop is exactly what was hammering the backend. Memoize on `range` only.
+  const startIso = useMemo(() => getStartIso(range), [range]);
   const { data: pgData, isLoading: pgLoading, error: pgError } = useQuery({
     queryKey: ["powerGenerationRange", range, startIso],
-    queryFn: async () => {
-      const res = await getData(
+    queryFn: () =>
+      getData(
         `/inverter/power-generation/?start=${startIso}&ordering=measurement_time&limit=5000`
-      );
-      return res;
-    },
+      ),
     enabled: range !== "live" && !!startIso,
-    refetchInterval: 60000,
+    refetchInterval: 5 * 60 * 1000,
+    staleTime: 2 * 60 * 1000,
   });
 
   // Group hourly records by hour (24h view) or day (7d / 30d view).

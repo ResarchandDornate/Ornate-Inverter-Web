@@ -66,9 +66,11 @@ export function useLiveInverters() {
 
       return enriched;
     },
-    // Slower poll + longer freshness — significantly fewer requests per minute
-    // and TanStack Query reuses cached data when navigating between pages.
+    // Slower poll + long staleTime so navigating between pages doesn't
+    // re-fire the request, and refetchOnMount: false ensures shared cache.
     refetchInterval: 15000,
-    staleTime: 10000,
+    staleTime: 14000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 }

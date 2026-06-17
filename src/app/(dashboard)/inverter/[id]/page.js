@@ -69,7 +69,8 @@ export default function InverterDetailsPage() {
 
   // Real daily energy from backend hourly aggregates (accurate; survives
   // missed polls/page reloads instead of being a client-side integration).
-  const todayStr = new Date().toISOString().split("T")[0];
+  // Memoize so queryKey stays stable across renders (only changes at midnight).
+  const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
   const { data: hourlyEnergyData } = useQuery({
     queryKey: ["inverterDailyEnergy", inverterId, todayStr],
     queryFn: () =>

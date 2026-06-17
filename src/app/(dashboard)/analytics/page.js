@@ -22,7 +22,9 @@ import { useLiveInverters } from "@/hooks/useLiveInverters";
 import { computeStatus, formatLastSeen } from "@/lib/inverterStatus";
 
 export default function AnalyticsPage() {
-  const todayStr = new Date().toISOString().split("T")[0];
+  // Memoize so it doesn't get recreated on every render (defensive — even
+  // though primitive strings compare by value, this keeps the intent clear).
+  const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
   const [date, setDate] = useState(todayStr);
   const isToday = date === todayStr;
 

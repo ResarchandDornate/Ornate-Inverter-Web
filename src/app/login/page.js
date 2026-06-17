@@ -32,7 +32,7 @@ export default function LoginPage() {
 
       setToken(token);
       showSuccess(message);
-      router.replace("/home");
+      router.replace("/dashboard");
     } catch (err) {
       showError(extractApiMessage(err, "Login failed. Please try again."));
     } finally {

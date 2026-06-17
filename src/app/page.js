@@ -9,7 +9,7 @@ export default function RootPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace(isAuthenticated() ? "/home" : "/login");
+    router.replace(isAuthenticated() ? "/dashboard" : "/login");
   }, [router]);
 
   return (

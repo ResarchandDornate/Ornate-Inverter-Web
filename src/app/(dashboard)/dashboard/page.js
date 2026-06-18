@@ -111,17 +111,27 @@ export default function DashboardPage() {
     setSeeded(true);
   }, [historicalSeed, seeded]);
 
+  // Treat an inverter as "actually reporting" only when the backend says so.
+  // Offline inverters keep their last cached power_out / temperature values,
+  // but those are stale — including them in the fleet aggregates would lie
+  // (e.g. KPI shows 1479 W when 0/2 inverters are actually online).
+  const isReporting = (i) =>
+    i.status === "online" || i.status === "idle" || i.is_online === true;
+
   const totalInverters = inverters.length;
   const onlineCount = inverters.filter((i) => i.is_online === true || i.status === "online").length;
   const totalPower = inverters.reduce(
-    (s, i) => s + Number(i.power_out ?? 0),
+    (s, i) => (isReporting(i) ? s + Number(i.power_out ?? 0) : s),
     0
   );
   const faultCount = inverters.filter((i) => Number(i.fault_bitmask ?? 0) > 0).length;
   const avgTemp = useMemo(() => {
-    const valid = inverters.filter((i) => i.temperature != null);
+    // Temperature is sensor data — once the inverter is offline the value
+    // is stale, so it shouldn't pull the fleet average around.
+    const valid = inverters.filter((i) => isReporting(i) && i.temperature != null);
     if (!valid.length) return 0;
     return valid.reduce((s, i) => s + Number(i.temperature), 0) / valid.length;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [inverters]);
 
   // Accumulate live samples for the rolling 5-min chart

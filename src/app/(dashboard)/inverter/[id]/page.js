@@ -43,7 +43,7 @@ const CHART_RANGES = [
   { id: "10m",    label: "Last 10 min",   source: "raw", windowMin: 10, bucketSec: 0 },
   { id: "1h",     label: "Last 1 hour",   source: "raw", windowMin: 60, bucketSec: 60 },
   { id: "1d",     label: "Last 24 hours", source: "pg",  windowHr: 24,  bucketKind: "hour" },
-  { id: "1w",     label: "Last week",     source: "pg",  windowDay: 7,  bucketKind: "hour" },
+  { id: "1w",     label: "Last week",     source: "pg",  windowDay: 7,  bucketKind: "day"  },
   { id: "1mo",    label: "Last month",    source: "pg",  windowDay: 30, bucketKind: "day"  },
   { id: "custom", label: "Custom date",   source: "pg",                 bucketKind: "hour" },
 ];
@@ -200,6 +200,7 @@ export default function InverterDetailsPage() {
       if (!currentRange.bucketSec) {
         // 10m view — raw samples, every reading is its own point.
         return filtered.map((d) => ({
+          t: d.t,
           time: format(new Date(d.t), "HH:mm:ss"),
           power: d.power,
         }));
@@ -217,6 +218,7 @@ export default function InverterDetailsPage() {
       return [...buckets.values()]
         .sort((a, b) => a.t - b.t)
         .map((b) => ({
+          t: b.t,
           time: format(new Date(b.t), "HH:mm"),
           power: b.sum / b.count,
         }));
@@ -252,7 +254,8 @@ export default function InverterDetailsPage() {
     return [...byDay.values()]
       .sort((a, b) => a.t - b.t)
       .map((b) => ({
-        time: format(new Date(b.t), "dd/MM"),
+        t: b.t,
+        time: format(new Date(b.t), "dd MMM"),
         power: b.count ? b.powerSum / b.count : 0,
         energy: b.energy,
       }));
@@ -565,6 +568,15 @@ export default function InverterDetailsPage() {
                           />
                           <Tooltip
                             formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
+                            labelFormatter={(_, payload) => {
+                              const t = payload?.[0]?.payload?.t;
+                              if (!t) return "";
+                              if (currentRange.bucketKind === "day")
+                                return format(new Date(t), "EEE, dd MMM yyyy");
+                              if (currentRange.bucketKind === "hour")
+                                return format(new Date(t), "EEE, dd MMM HH:mm");
+                              return format(new Date(t), "EEE, dd MMM HH:mm:ss");
+                            }}
                             contentStyle={{ fontSize: 12, borderRadius: 8 }}
                           />
                           <Bar
@@ -585,6 +597,15 @@ export default function InverterDetailsPage() {
                           <YAxis domain={[0, "auto"]} tick={{ fontSize: 10, fill: "#6B7280" }} unit={yUnit} width={70} />
                           <Tooltip
                             formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
+                            labelFormatter={(_, payload) => {
+                              const t = payload?.[0]?.payload?.t;
+                              if (!t) return "";
+                              if (currentRange.bucketKind === "day")
+                                return format(new Date(t), "EEE, dd MMM yyyy");
+                              if (currentRange.bucketKind === "hour")
+                                return format(new Date(t), "EEE, dd MMM HH:mm");
+                              return format(new Date(t), "EEE, dd MMM HH:mm:ss");
+                            }}
                             contentStyle={{ fontSize: 12, borderRadius: 8 }}
                           />
                           <Bar

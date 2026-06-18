@@ -5,8 +5,8 @@ import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
-  LineChart,
-  Line,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -100,8 +100,9 @@ export default function InverterDetailsPage() {
       return allData;
     },
     enabled: !!inverterId,
-    refetchInterval: 60000,
-    staleTime: 50000,
+    // Fast polling so the chart + Detailed Readings table feel live.
+    refetchInterval: 15000,
+    staleTime: 12000,
   });
 
   // Real daily energy from backend hourly aggregates (accurate; survives
@@ -113,8 +114,8 @@ export default function InverterDetailsPage() {
         `/inverter/power-generation/?inverter=${inverterId}&start=${todayStr}T00:00:00&end=${todayStr}T23:59:59&ordering=measurement_time`
       ),
     enabled: !!inverterId,
-    refetchInterval: 60000,
-    staleTime: 30000,
+    refetchInterval: 30000,
+    staleTime: 25000,
   });
 
   // Status endpoint /grid_status/ gives us authoritative status + last_seen.
@@ -122,8 +123,8 @@ export default function InverterDetailsPage() {
     queryKey: ["inverterGridStatus", inverterId],
     queryFn: () => getData(`/inverter/inverters/${inverterId}/grid_status/`),
     enabled: !!inverterId,
-    refetchInterval: 15000,
-    staleTime: 10000,
+    refetchInterval: 10000,
+    staleTime: 8000,
   });
 
   const generationData = inverterHistory || [];
@@ -313,6 +314,18 @@ export default function InverterDetailsPage() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <StatusBadge status={status} />
+            {/* Auto-update indicator — pulses while a refetch is in flight,
+                otherwise just shows that the page is live-updating. */}
+            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-green-100 bg-green-50">
+              <span
+                className={`w-1.5 h-1.5 rounded-full bg-green-500 ${
+                  isRefetching ? "animate-ping" : "animate-pulse"
+                }`}
+              />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-green-700">
+                {isRefetching ? "Updating" : "Live"}
+              </span>
+            </div>
             <button
               onClick={() => onRefresh()}
               className="flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600"
@@ -514,7 +527,7 @@ export default function InverterDetailsPage() {
                         className="absolute top-0 left-0 z-10 pointer-events-none bg-white"
                         style={{ width: 70, height: 420 }}
                       >
-                        <LineChart
+                        <BarChart
                           width={70}
                           height={420}
                           data={chartData}
@@ -525,14 +538,14 @@ export default function InverterDetailsPage() {
                             tick={{ fontSize: 10, fill: "#6B7280" }}
                             unit={yUnit}
                           />
-                          <Line dataKey="power" stroke="transparent" dot={false} />
-                        </LineChart>
+                          <Bar dataKey="power" fill="transparent" />
+                        </BarChart>
                       </div>
 
                       {/* Scrollable plot area — Y-axis is rendered invisibly so
                           the data chart's left margin matches the sticky Y-axis. */}
                       <div className="overflow-x-auto scrollbar-thin" style={{ height: 420 }}>
-                        <LineChart
+                        <BarChart
                           width={scrollWidth}
                           height={420}
                           data={chartData}
@@ -550,35 +563,37 @@ export default function InverterDetailsPage() {
                             axisLine={false}
                             width={70}
                           />
-                          <Tooltip />
-                          <Line
-                            type="monotone"
-                            dataKey="power"
-                            stroke="#E97451"
-                            strokeWidth={2.5}
-                            dot={{ r: 2, stroke: "#E97451", strokeWidth: 1.5, fill: "#fff" }}
-                            activeDot={{ r: 5 }}
+                          <Tooltip
+                            formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
+                            contentStyle={{ fontSize: 12, borderRadius: 8 }}
                           />
-                        </LineChart>
+                          <Bar
+                            dataKey="power"
+                            fill="#E97451"
+                            radius={[3, 3, 0, 0]}
+                            maxBarSize={20}
+                          />
+                        </BarChart>
                       </div>
                     </div>
                   ) : (
                     <div style={{ width: "100%", height: 420 }}>
-                      <ResponsiveContainer>
-                        <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
                           <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={20} />
                           <YAxis domain={[0, "auto"]} tick={{ fontSize: 10, fill: "#6B7280" }} unit={yUnit} width={70} />
-                          <Tooltip />
-                          <Line
-                            type="monotone"
-                            dataKey="power"
-                            stroke="#E97451"
-                            strokeWidth={2.5}
-                            dot={{ r: 3, stroke: "#E97451", strokeWidth: 2, fill: "#fff" }}
-                            activeDot={{ r: 5 }}
+                          <Tooltip
+                            formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
+                            contentStyle={{ fontSize: 12, borderRadius: 8 }}
                           />
-                        </LineChart>
+                          <Bar
+                            dataKey="power"
+                            fill="#E97451"
+                            radius={[4, 4, 0, 0]}
+                            maxBarSize={28}
+                          />
+                        </BarChart>
                       </ResponsiveContainer>
                     </div>
                   )}

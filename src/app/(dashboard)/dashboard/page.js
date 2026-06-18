@@ -26,6 +26,7 @@ import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
 import { useLiveInverters } from "@/hooks/useLiveInverters";
 import { computeStatus } from "@/lib/inverterStatus";
+import WeatherWidget from "@/components/WeatherWidget";
 
 const MAX_LIVE_SAMPLES = 30; // ~5 min @ 10s polling
 
@@ -299,12 +300,12 @@ export default function DashboardPage() {
             label="Inverters Online"
             value={`${onlineCount}/${totalInverters}`}
             icon={Activity}
-            accent={onlineCount === totalInverters && totalInverters > 0 ? "green" : "slate"}
+            accent="green"
           />
           <KpiCard
             label="Live Power"
-            value={totalPower.toFixed(0)}
-            unit="W"
+            value={onlineCount === 0 ? "—" : totalPower.toFixed(0)}
+            unit={onlineCount === 0 ? "" : "W"}
             icon={Zap}
             accent="orange"
           />
@@ -317,8 +318,8 @@ export default function DashboardPage() {
           />
           <KpiCard
             label="Avg Temperature"
-            value={avgTemp.toFixed(1)}
-            unit="°C"
+            value={onlineCount === 0 ? "—" : avgTemp.toFixed(1)}
+            unit={onlineCount === 0 ? "" : "°C"}
             icon={BatteryCharging}
             accent="blue"
           />
@@ -326,7 +327,7 @@ export default function DashboardPage() {
             label="Active Faults"
             value={faultCount}
             icon={AlertTriangle}
-            accent={faultCount > 0 ? "red" : "slate"}
+            accent={faultCount > 0 ? "red" : "green"}
           />
         </section>
 
@@ -393,12 +394,22 @@ export default function DashboardPage() {
 
             {/* Chart — bar charts on every tab. 7d (168 bars) scrolls with
                 a sticky Y-axis; everything else fits the card via ResponsiveContainer. */}
-            <div style={{ width: "100%", height: 280 }}>
+            <div style={{ width: "100%", height: 480 }}>
               {range === "live" ? (
                 !seeded || liveSeries.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-full text-sm text-slate-400">
                     <div className="h-8 w-8 animate-spin rounded-full border-2 border-orange-500 border-t-transparent mb-3" />
                     {seeded ? "Waiting for first sample…" : "Loading recent history…"}
+                  </div>
+                ) : onlineCount === 0 && liveSeries.every((p) => p.power === 0) ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center px-6">
+                    <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center mb-3">
+                      <Zap size={22} className="text-slate-400" />
+                    </div>
+                    <p className="text-sm font-semibold text-slate-600">All inverters offline</p>
+                    <p className="text-xs text-slate-400 mt-1 max-w-xs">
+                      Live generation will appear here once any inverter comes back online.
+                    </p>
                   </div>
                 ) : (
                   <ResponsiveContainer>
@@ -435,15 +446,15 @@ export default function DashboardPage() {
                 </div>
               ) : range === "7d" ? (
                 // Sticky Y-axis + scrollable plot area for the wide 7-day view.
-                <div className="relative" style={{ height: 280 }}>
+                <div className="relative" style={{ height: 480 }}>
                   {/* Sticky Y-axis layer */}
                   <div
                     className="absolute top-0 left-0 z-10 pointer-events-none bg-white"
-                    style={{ width: 70, height: 280 }}
+                    style={{ width: 70, height: 480 }}
                   >
                     <BarChart
                       width={70}
-                      height={280}
+                      height={480}
                       data={historicalChart}
                       margin={{ top: 10, right: 0, left: 5, bottom: 30 }}
                     >
@@ -456,10 +467,10 @@ export default function DashboardPage() {
                     </BarChart>
                   </div>
                   {/* Scrollable plot — Y-axis hidden but space reserved */}
-                  <div className="overflow-x-auto scrollbar-thin" style={{ height: 280 }}>
+                  <div className="overflow-x-auto scrollbar-thin" style={{ height: 480 }}>
                     <BarChart
                       width={Math.max(800, historicalChart.length * 14)}
-                      height={280}
+                      height={480}
                       data={historicalChart}
                       margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
                     >
@@ -528,14 +539,61 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="bg-white rounded-xl border border-slate-200 p-5">
+          {/* Right column: Weather stacked above Recent Activity */}
+          <div className="flex flex-col gap-4 min-w-0">
+            <WeatherWidget />
+
+            <div className="bg-white rounded-xl border border-slate-200 p-5 flex-1">
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base font-bold text-slate-900">Recent Activity</h2>
-              <Link href="/alerts" className="text-xs text-orange-600 font-semibold hover:underline">
-                View all
+              <div>
+                <h2 className="text-base font-bold text-slate-900">Recent Activity</h2>
+                <p className="text-xs text-slate-500">Faults & system events</p>
+              </div>
+              <Link
+                href="/alerts"
+                className="text-xs text-orange-600 font-semibold hover:underline flex items-center gap-1 shrink-0"
+              >
+                View all <ArrowUpRight size={11} />
               </Link>
             </div>
-            <ul className="space-y-3 max-h-[260px] overflow-y-auto pr-1">
+
+            {/* Overall health badge */}
+            <div
+              className={`flex items-center gap-2 px-3 py-2 rounded-lg border mb-4 ${
+                faultCount > 0
+                  ? "bg-red-50 border-red-100"
+                  : onlineCount === 0
+                  ? "bg-slate-50 border-slate-200"
+                  : "bg-green-50 border-green-100"
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  faultCount > 0
+                    ? "bg-red-500 animate-pulse"
+                    : onlineCount === 0
+                    ? "bg-slate-400"
+                    : "bg-green-500 animate-pulse"
+                }`}
+              />
+              <p
+                className={`text-xs font-bold uppercase tracking-wider ${
+                  faultCount > 0
+                    ? "text-red-700"
+                    : onlineCount === 0
+                    ? "text-slate-600"
+                    : "text-green-700"
+                }`}
+              >
+                {faultCount > 0
+                  ? `${faultCount} active fault${faultCount === 1 ? "" : "s"}`
+                  : onlineCount === 0
+                  ? "Fleet idle"
+                  : "All systems nominal"}
+              </p>
+            </div>
+
+            <ul className="space-y-2.5 max-h-[210px] overflow-y-auto scrollbar-thin pr-1">
               {(faultCount > 0
                 ? inverters
                     .filter((i) => Number(i.fault_bitmask ?? 0) > 0)
@@ -545,31 +603,46 @@ export default function DashboardPage() {
                       detail: `Bitmask 0x${Number(i.fault_bitmask).toString(16).toUpperCase()}`,
                       time: "now",
                     }))
+                : onlineCount === 0
+                ? [
+                    { type: "warn", title: "All inverters offline", detail: `${totalInverters} device${totalInverters === 1 ? "" : "s"} not reporting`, time: "now" },
+                    { type: "info", title: "Awaiting connection", detail: "Last poll completed", time: "just now" },
+                  ]
                 : [
-                    { type: "ok", title: "All systems nominal", detail: "No active faults", time: "now" },
-                    { type: "info", title: "Live polling active", detail: `${onlineCount} online`, time: "1 min ago" },
+                    { type: "ok", title: "Systems nominal", detail: "No active faults", time: "now" },
+                    { type: "info", title: "Live polling active", detail: `${onlineCount} of ${totalInverters} online`, time: "just now" },
                   ]
               ).map((a, i) => (
-                <li key={i} className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-slate-50">
+                <li
+                  key={i}
+                  className="flex items-start gap-3 p-2.5 rounded-lg hover:bg-slate-50 transition-colors"
+                >
                   <div
                     className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
                       a.type === "fault"
                         ? "bg-red-50 text-red-600"
                         : a.type === "ok"
                         ? "bg-green-50 text-green-600"
+                        : a.type === "warn"
+                        ? "bg-amber-50 text-amber-600"
                         : "bg-slate-100 text-slate-600"
                     }`}
                   >
-                    {a.type === "fault" ? <AlertTriangle size={16} /> : <Activity size={16} />}
+                    {a.type === "fault" || a.type === "warn" ? (
+                      <AlertTriangle size={16} />
+                    ) : (
+                      <Activity size={16} />
+                    )}
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-slate-900 truncate">{a.title}</p>
                     <p className="text-xs text-slate-500 truncate">{a.detail}</p>
                   </div>
-                  <span className="text-[10px] text-slate-400 shrink-0">{a.time}</span>
+                  <span className="text-[10px] text-slate-400 shrink-0 mt-1">{a.time}</span>
                 </li>
               ))}
             </ul>
+            </div>
           </div>
         </section>
 
@@ -606,9 +679,9 @@ export default function DashboardPage() {
                   const status = computeStatus(inv);
                   return (
                     <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
-                      <td className="px-5 py-3 font-semibold text-slate-900">{inv.name}</td>
-                      <td className="px-5 py-3 text-slate-500 font-mono text-xs">{inv.serial_number}</td>
-                      <td className="px-5 py-3"><StatusBadge status={status} /></td>
+                      <td className="px-5 py-3 text-center font-semibold text-slate-900">{inv.name}</td>
+                      <td className="px-5 py-3 text-center text-slate-500 font-mono text-xs">{inv.serial_number}</td>
+                      <td className="px-5 py-3 text-center"><StatusBadge status={status} /></td>
                       <td className="px-5 py-3 text-center text-slate-700">
                         {Number(inv.power_out ?? 0).toFixed(0)} W
                       </td>

@@ -16,8 +16,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Area,
-  AreaChart,
   BarChart,
   Bar,
   Cell,
@@ -33,9 +31,10 @@ const MAX_LIVE_SAMPLES = 30; // ~5 min @ 10s polling
 
 const RANGES = [
   { id: "live", label: "Live" },
-  { id: "24h", label: "Last 24h" },
-  { id: "7d", label: "Last 7 days" },
-  { id: "30d", label: "Last 30 days" },
+  { id: "1h",   label: "Last 1 hour" },
+  { id: "24h",  label: "Last 24h" },
+  { id: "7d",   label: "Last 7 days" },
+  { id: "30d",  label: "Last 30 days" },
 ];
 
 // Returns a naive ISO 8601 datetime string `YYYY-MM-DDTHH:mm:ss` (no ms, no Z)
@@ -43,7 +42,12 @@ const RANGES = [
 // timezone-suffixed form (`...Z`) was returning empty results.
 function getStartIso(range) {
   const now = Date.now();
-  const map = { "24h": 24 * 3600, "7d": 7 * 86400, "30d": 30 * 86400 };
+  const map = {
+    "1h":  60 * 60,
+    "24h": 24 * 3600,
+    "7d":  7 * 86400,
+    "30d": 30 * 86400,
+  };
   const secs = map[range];
   if (!secs) return null;
   const d = new Date(now - secs * 1000);
@@ -161,21 +165,94 @@ export default function DashboardPage() {
   // TanStack Query treat it as a fresh query and re-fire the request. That
   // loop is exactly what was hammering the backend. Memoize on `range` only.
   const startIso = useMemo(() => getStartIso(range), [range]);
+
+  // Historical aggregates from /power-generation/ — used by 24h / 7d / 30d.
   const { data: pgData, isLoading: pgLoading, error: pgError } = useQuery({
     queryKey: ["powerGenerationRange", range, startIso],
     queryFn: () =>
       getData(
         `/inverter/power-generation/?start=${startIso}&ordering=measurement_time&limit=5000`
       ),
-    enabled: range !== "live" && !!startIso,
+    enabled: (range === "24h" || range === "7d" || range === "30d") && !!startIso,
     refetchInterval: 5 * 60 * 1000,
     staleTime: 2 * 60 * 1000,
   });
 
-  // Group hourly records by hour (24h view) or day (7d / 30d view).
-  // Sum across all inverters per bucket.
+  // Raw telemetry for the last hour — needed for the 1h tab because the
+  // /power-generation/ endpoint only stores HOURLY aggregates. We paginate
+  // through the last hour of /inverter-data/ across the whole fleet, then
+  // bucket client-side into 10-minute groups.
+  const { data: oneHourData, isLoading: oneHourLoading, error: oneHourError } = useQuery({
+    queryKey: ["dashboard1hRaw", startIso],
+    queryFn: async () => {
+      const allData = [];
+      const baseUrl = `/inverter/inverter-data/?start=${startIso}&ordering=-timestamp`;
+      const MAX_PAGES = 12; // up to 1200 records — plenty for 1h × small fleet
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const url = page === 1 ? baseUrl : `${baseUrl}&page=${page}`;
+        let response;
+        try {
+          response = await getData(url);
+        } catch {
+          break;
+        }
+        const results = response?.results || [];
+        if (results.length === 0) break;
+        allData.push(...results);
+        if (!response.next) break;
+      }
+      return allData;
+    },
+    enabled: range === "1h" && !!startIso,
+    refetchInterval: 60 * 1000,
+    staleTime: 50 * 1000,
+  });
+
+  const histLoading = range === "1h" ? oneHourLoading : pgLoading;
+  const histError = range === "1h" ? oneHourError : pgError;
+
   const historicalChart = useMemo(() => {
     if (range === "live") return [];
+
+    if (range === "1h") {
+      // Bucket raw telemetry into 10-minute groups. For each bucket we
+      // average power_out per inverter, then sum across the fleet.
+      const TEN_MIN_MS = 10 * 60 * 1000;
+      const buckets = new Map();
+      (oneHourData || []).forEach((r) => {
+        const t = new Date(r.timestamp).getTime();
+        const bucketStart = Math.floor(t / TEN_MIN_MS) * TEN_MIN_MS;
+        if (!buckets.has(bucketStart)) {
+          buckets.set(bucketStart, { t: bucketStart, perInverter: new Map() });
+        }
+        const bucket = buckets.get(bucketStart);
+        const invId = r.inverter;
+        if (!bucket.perInverter.has(invId)) {
+          bucket.perInverter.set(invId, { sum: 0, count: 0 });
+        }
+        const inv = bucket.perInverter.get(invId);
+        inv.sum += parseFloat(r.power_out || 0);
+        inv.count += 1;
+      });
+      return [...buckets.values()]
+        .sort((a, b) => a.t - b.t)
+        .map((bucket) => {
+          let fleetAvgPower = 0;
+          bucket.perInverter.forEach((inv) => {
+            fleetAvgPower += inv.count > 0 ? inv.sum / inv.count : 0;
+          });
+          const d = new Date(bucket.t);
+          const pad = (n) => String(n).padStart(2, "0");
+          return {
+            sortKey: bucket.t,
+            label: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
+            avgPower: fleetAvgPower,
+            energy: 0, // not relevant for 1h bar — show power as the bar height
+          };
+        });
+    }
+
+    // 24h / 7d / 30d — group /power-generation/ records by hour or day.
     const records = pgData?.results || [];
     const byKey = {};
     records.forEach((r) => {
@@ -196,10 +273,11 @@ export default function DashboardPage() {
     return Object.values(byKey)
       .map((b) => ({ ...b, avgPower: b.count ? b.avgPower / b.count : 0 }))
       .sort((a, b) => a.sortKey - b.sortKey);
-  }, [pgData, range]);
+  }, [pgData, oneHourData, range]);
 
-  const rangeTotalEnergy = historicalChart.reduce((s, b) => s + b.energy, 0);
-  const rangePeakPower = historicalChart.reduce((m, b) => Math.max(m, b.avgPower), 0);
+  const rangeTotalEnergy = historicalChart.reduce((s, b) => s + (b.energy || 0), 0);
+  const rangePeakPower = historicalChart.reduce((m, b) => Math.max(m, b.avgPower || 0), 0);
+  const isPowerView = range === "1h"; // 1h uses power bars (W), others use energy bars (kWh)
 
   return (
     <>
@@ -303,7 +381,8 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* Chart */}
+            {/* Chart — bar charts on every tab. 7d (168 bars) scrolls with
+                a sticky Y-axis; everything else fits the card via ResponsiveContainer. */}
             <div style={{ width: "100%", height: 280 }}>
               {range === "live" ? (
                 !seeded || liveSeries.length === 0 ? (
@@ -313,52 +392,88 @@ export default function DashboardPage() {
                   </div>
                 ) : (
                   <ResponsiveContainer>
-                    <AreaChart data={liveSeries} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                      <defs>
-                        <linearGradient id="powerGradient" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="#E97451" stopOpacity={0.5} />
-                          <stop offset="95%" stopColor="#E97451" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
+                    <BarChart data={liveSeries} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
                       <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={30} />
-                      <YAxis
-                        tick={{ fontSize: 11, fill: "#6B7280" }}
-                        unit=" W"
-                        domain={[0, "auto"]}
-                        width={70}
-                      />
+                      <YAxis tick={{ fontSize: 11, fill: "#6B7280" }} unit=" W" domain={[0, "auto"]} width={70} />
                       <Tooltip
                         formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
                         contentStyle={{ fontSize: 12, borderRadius: 8 }}
                       />
-                      <Area
-                        type="monotone"
-                        dataKey="power"
-                        name="Power"
-                        stroke="#E97451"
-                        strokeWidth={2.5}
-                        fill="url(#powerGradient)"
-                      />
-                    </AreaChart>
+                      <Bar dataKey="power" name="Power" radius={[4, 4, 0, 0]} maxBarSize={18}>
+                        {liveSeries.map((_, i) => (
+                          <Cell key={i} fill="#E97451" opacity={0.55 + (i / liveSeries.length) * 0.45} />
+                        ))}
+                      </Bar>
+                    </BarChart>
                   </ResponsiveContainer>
                 )
-              ) : pgLoading ? (
+              ) : histLoading ? (
                 <div className="flex flex-col items-center justify-center h-full text-sm text-slate-400">
                   <div className="h-8 w-8 animate-spin rounded-full border-2 border-orange-500 border-t-transparent mb-3" />
                   Loading aggregates…
                 </div>
-              ) : pgError ? (
+              ) : histError ? (
                 <div className="flex flex-col items-center justify-center h-full text-sm text-red-500 px-6 text-center">
                   <AlertTriangle size={20} className="mb-2" />
                   <p className="font-semibold">Couldn&apos;t load aggregates</p>
-                  <p className="text-xs text-slate-500 mt-1">{pgError.message}</p>
+                  <p className="text-xs text-slate-500 mt-1">{histError.message}</p>
                 </div>
               ) : historicalChart.length === 0 ? (
                 <div className="flex items-center justify-center h-full text-sm text-slate-400">
-                  No energy data in this range yet.
+                  No data in this range yet.
+                </div>
+              ) : range === "7d" ? (
+                // Sticky Y-axis + scrollable plot area for the wide 7-day view.
+                <div className="relative" style={{ height: 280 }}>
+                  {/* Sticky Y-axis layer */}
+                  <div
+                    className="absolute top-0 left-0 z-10 pointer-events-none bg-white"
+                    style={{ width: 70, height: 280 }}
+                  >
+                    <BarChart
+                      width={70}
+                      height={280}
+                      data={historicalChart}
+                      margin={{ top: 10, right: 0, left: 5, bottom: 30 }}
+                    >
+                      <YAxis
+                        domain={[0, "auto"]}
+                        tick={{ fontSize: 11, fill: "#6B7280" }}
+                        unit=" kWh"
+                      />
+                      <Bar dataKey="energy" fill="transparent" />
+                    </BarChart>
+                  </div>
+                  {/* Scrollable plot — Y-axis hidden but space reserved */}
+                  <div className="overflow-x-auto scrollbar-thin" style={{ height: 280 }}>
+                    <BarChart
+                      width={Math.max(800, historicalChart.length * 14)}
+                      height={280}
+                      data={historicalChart}
+                      margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                      <XAxis
+                        dataKey="label"
+                        tick={{ fontSize: 10, fill: "#6B7280" }}
+                        interval={Math.max(0, Math.floor(historicalChart.length / 30))}
+                      />
+                      <YAxis domain={[0, "auto"]} tick={false} axisLine={false} width={70} />
+                      <Tooltip
+                        formatter={(v) => [`${Number(v).toFixed(3)} kWh`, "Energy"]}
+                        contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                      />
+                      <Bar dataKey="energy" name="energy" radius={[3, 3, 0, 0]} maxBarSize={14}>
+                        {historicalChart.map((_, i) => (
+                          <Cell key={i} fill="#E97451" opacity={0.6 + (i / historicalChart.length) * 0.4} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </div>
                 </div>
               ) : (
+                // 1h / 24h / 30d — fits within the card; no scroll needed.
                 <ResponsiveContainer>
                   <BarChart data={historicalChart} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
@@ -372,20 +487,29 @@ export default function DashboardPage() {
                     />
                     <YAxis
                       tick={{ fontSize: 11, fill: "#6B7280" }}
-                      unit=" kWh"
+                      unit={isPowerView ? " W" : " kWh"}
                       width={70}
                     />
                     <Tooltip
-                      formatter={(v, name) => {
-                        if (name === "energy") return [`${Number(v).toFixed(3)} kWh`, "Energy"];
-                        return [`${Number(v).toFixed(0)} W`, "Avg Power"];
-                      }}
-                      labelFormatter={(l) => `${range === "24h" ? "Hour" : "Day"}: ${l}`}
+                      formatter={(v) =>
+                        isPowerView
+                          ? [`${Number(v).toFixed(0)} W`, "Avg Power"]
+                          : [`${Number(v).toFixed(3)} kWh`, "Energy"]
+                      }
+                      labelFormatter={(l) =>
+                        range === "1h" ? `10-min bucket: ${l}` :
+                        range === "24h" ? `Hour: ${l}` : `Day: ${l}`
+                      }
                       contentStyle={{ fontSize: 12, borderRadius: 8 }}
                     />
-                    <Bar dataKey="energy" name="energy" radius={[4, 4, 0, 0]} maxBarSize={40}>
+                    <Bar
+                      dataKey={isPowerView ? "avgPower" : "energy"}
+                      name={isPowerView ? "avgPower" : "energy"}
+                      radius={[4, 4, 0, 0]}
+                      maxBarSize={range === "1h" ? 48 : 40}
+                    >
                       {historicalChart.map((_, i) => (
-                        <Cell key={i} fill="#E97451" opacity={0.7 + (i / historicalChart.length) * 0.3} />
+                        <Cell key={i} fill="#E97451" opacity={0.65 + (i / historicalChart.length) * 0.35} />
                       ))}
                     </Bar>
                   </BarChart>

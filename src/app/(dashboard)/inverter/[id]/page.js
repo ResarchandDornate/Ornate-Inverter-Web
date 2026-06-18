@@ -137,13 +137,14 @@ export default function InverterDetailsPage() {
     grid_connected: gridStatusData?.grid_connected ?? latestReading.grid_connected,
   };
   const gridConnected = merged.grid_connected ?? null;
-  // Treat the device as "offline" for telemetry-display purposes whenever it
-  // isn't reachable (is_online: false / status: offline). Otherwise stale
-  // grid_connected from the last cached reading would still show ON even
-  // though we can't talk to the inverter.
+  // Use the same priority ordering as computeStatus(): trust the explicit
+  // `status` field first (it reflects the backend's "offline after 10+ min
+  // of zero power" rule), then is_online, then grid_connected. This makes
+  // every per-card display flip together — Voltage, Current, Grid Status,
+  // VPV/IPV/Delta all collapse to 0 / N/A / OFF when offline is true.
   const offline =
-    merged.is_online === false ||
     merged.status === "offline" ||
+    merged.is_online === false ||
     gridConnected === false;
   const bitmask = Number(latestReading.fault_bitmask ?? 0);
   const hasFault = bitmask > 0;

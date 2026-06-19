@@ -316,8 +316,11 @@ export default function InverterDetailsPage() {
   }, [currentRange, generationData, chartPgData]);
 
   const yUnit = currentRange.source === "pg" ? " W avg" : " W";
-  const needsScroll = chartData.length > 80;
-  const scrollWidth = needsScroll ? Math.max(800, chartData.length * 14) : 0;
+  // Scroll once bars would otherwise be < ~20 px wide. Drops the threshold
+  // from 80 → 40 so the Last 1 hour view (60 bars) gets fatter, readable bars
+  // with a horizontal scrollbar instead of being squeezed into the card width.
+  const needsScroll = chartData.length > 40;
+  const scrollWidth = needsScroll ? Math.max(800, chartData.length * 22) : 0;
 
   // Sum hourly buckets returned by /power-generation/ for today.
   const dailyEnergyKwh = useMemo(() => {

@@ -25,6 +25,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   RefreshCw,
+  Download,
 } from "lucide-react";
 import { getData } from "@/lib/api";
 import { QUERY_KEYS } from "@/lib/queryKeys";
@@ -47,6 +48,67 @@ const CHART_RANGES = [
   { id: "1mo",    label: "Last month",    source: "pg",  windowDay: 30, bucketKind: "day"  },
   { id: "custom", label: "Custom date",   source: "pg",                 bucketKind: "hour" },
 ];
+
+// Convert an array of telemetry records to CSV and trigger a browser download.
+// Excel opens CSV with a UTF-8 BOM correctly, so no .xlsx library needed.
+function exportReadingsToCsv(records, inverterId) {
+  if (!records || records.length === 0) {
+    alert("No readings to export.");
+    return;
+  }
+
+  const headers = [
+    "Timestamp",
+    "Voltage (V)",
+    "Current (A)",
+    "Power Out (W)",
+    "Power In (W)",
+    "VPV (V)",
+    "IPV (A)",
+    "PF",
+    "Temperature (°C)",
+    "Grid Connected",
+    "Fault Bitmask",
+  ];
+
+  const rows = records.map((r) => [
+    new Date(r.timestamp).toLocaleString("en-IN", { hour12: false }),
+    Number(r.voltage ?? 0).toFixed(2),
+    Number(r.current ?? 0).toFixed(2),
+    Number(r.power_out ?? 0).toFixed(2),
+    Number(r.power_in ?? 0).toFixed(2),
+    Number(r.vpv ?? 0).toFixed(2),
+    Number(r.ipv ?? 0).toFixed(2),
+    Number(r.delta ?? 0).toFixed(2),
+    r.temperature ?? "",
+    r.grid_connected ? "Yes" : "No",
+    r.fault_bitmask ?? 0,
+  ]);
+
+  const escape = (cell) => {
+    const str = String(cell ?? "");
+    if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  };
+
+  const csv = [headers, ...rows]
+    .map((row) => row.map(escape).join(","))
+    .join("\n");
+
+  // BOM prefix makes Excel detect UTF-8 properly (otherwise it garbles °, ₹, etc.)
+  const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const today = new Date().toISOString().split("T")[0];
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `inverter-${inverterId}-readings-${today}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 export default function InverterDetailsPage() {
   const { id: inverterId } = useParams();
@@ -386,6 +448,15 @@ export default function InverterDetailsPage() {
                 {isRefetching ? "Updating" : "Live"}
               </span>
             </div>
+            <button
+              onClick={() => exportReadingsToCsv(generationData, inverterId)}
+              disabled={!generationData.length}
+              className="flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Download readings as CSV (opens in Excel)"
+            >
+              <Download size={14} />
+              Export
+            </button>
             <button
               onClick={() => onRefresh()}
               className="flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-600"

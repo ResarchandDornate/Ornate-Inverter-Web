@@ -68,14 +68,17 @@ export default function InverterDetailsPage() {
   } = useQuery({
     queryKey: [...QUERY_KEYS.INVERTER_DETAILS(inverterId), todayStr],
     queryFn: async () => {
-      // The backend caps each response at ~100 records regardless of limit=.
-      // We paginate through up to MAX_PAGES pages sequentially (gentle on
-      // the rate limit) to get all of today's readings.
+      // Use the backend's new `range=1d` preset so the page always loads with
+      // the last 24h of data on hand. This means:
+      //   - "Last 10 min" / "Last 1 hour" tabs always have history to show
+      //     immediately after page reload (no waiting + no empty chart)
+      //   - Even right after midnight, the chart spans the previous evening
+      //     instead of showing only the few minutes of "today"
       const MAX_PAGES = 20; // 20 × 100 = up to 2000 records (~2.8h of 5s samples)
       const allData = [];
       const baseUrl =
         `/inverter/inverter-data/?inverter=${inverterId}` +
-        `&start=${todayStr}T00:00:00&ordering=-timestamp`;
+        `&range=1d&ordering=-timestamp`;
 
       for (let page = 1; page <= MAX_PAGES; page++) {
         const url = page === 1 ? baseUrl : `${baseUrl}&page=${page}`;

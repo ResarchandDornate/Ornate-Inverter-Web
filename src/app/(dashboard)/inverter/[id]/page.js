@@ -101,6 +101,8 @@ export default function InverterDetailsPage() {
     // Fast polling so the chart + Detailed Readings table feel live.
     refetchInterval: 15000,
     staleTime: 12000,
+    gcTime: 30 * 60 * 1000,          // keep 24h of readings cached for 30 min after unmount
+    refetchOnWindowFocus: false,
   });
 
   // Real daily energy from backend hourly aggregates (accurate; survives
@@ -176,7 +178,10 @@ export default function InverterDetailsPage() {
       ),
     enabled: !!inverterId && !!pgQueryFilter,
     refetchInterval: 5 * 60 * 1000,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 5 * 60 * 1000,        // treat data fresh for 5 min — no refetch when re-entering tab
+    gcTime: 30 * 60 * 1000,          // keep cached for 30 min after unmount
+    refetchOnMount: false,           // re-entering a tab serves cache, not a fresh fetch
+    refetchOnWindowFocus: false,
   });
 
   // Build the chart series — aggregation per the spec for each range:
@@ -201,60 +206,113 @@ export default function InverterDetailsPage() {
           power: d.power,
         }));
       }
-      // 1h view — group into 1-minute buckets and average power.
-      const ms = currentRange.bucketSec * 1000;
+      // 1h view — one bar per minute for the FULL last hour. Minutes with no
+      // telemetry render as 0-height bars so the X-axis still shows every
+      // minute slot in order (instead of just the few that happen to have data).
+      const bucketMs = currentRange.bucketSec * 1000;
       const buckets = new Map();
       filtered.forEach(({ t, power }) => {
-        const key = Math.floor(t / ms) * ms;
-        if (!buckets.has(key)) buckets.set(key, { t: key, sum: 0, count: 0 });
+        const key = Math.floor(t / bucketMs) * bucketMs;
+        if (!buckets.has(key)) buckets.set(key, { sum: 0, count: 0 });
         const b = buckets.get(key);
         b.sum += power;
         b.count += 1;
       });
-      return [...buckets.values()]
-        .sort((a, b) => a.t - b.t)
-        .map((b) => ({
-          t: b.t,
-          time: format(new Date(b.t), "HH:mm"),
-          power: b.sum / b.count,
-        }));
+
+      const nowMs = Date.now();
+      const firstSlot = Math.floor((nowMs - currentRange.windowMin * 60 * 1000) / bucketMs) * bucketMs;
+      const lastSlot = Math.floor(nowMs / bucketMs) * bucketMs;
+      const series = [];
+      for (let t = firstSlot; t <= lastSlot; t += bucketMs) {
+        const b = buckets.get(t);
+        series.push({
+          t,
+          time: format(new Date(t), "HH:mm"),
+          power: b ? b.sum / b.count : 0,
+        });
+      }
+      return series;
     }
 
     // Source: /power-generation/ (already hourly buckets server-side).
     const records = chartPgData?.results || [];
     if (currentRange.bucketKind === "hour") {
-      // 1d / 1w / custom — each hourly bucket is its own chart point.
-      return records
-        .map((r) => ({
-          t: new Date(r.measurement_time).getTime(),
-          time: format(new Date(r.measurement_time), "dd/MM HH:mm"),
-          power: parseFloat(r.avg_power || 0),
-          energy: parseFloat(r.energy_generated || 0),
-        }))
-        .sort((a, b) => a.t - b.t);
+      // 1d / custom — render ONE bar for every hour in the window (24 bars),
+      // including hours that have no data (those become 0-height bars). The
+      // backend may store records at HH:30 inside the hour, so we bucket each
+      // record by floor(timestamp / 1h) and lookup by hour-start key.
+      const HOUR_MS = 60 * 60 * 1000;
+      const byHour = new Map();
+      records.forEach((r) => {
+        const t = new Date(r.measurement_time).getTime();
+        const key = Math.floor(t / HOUR_MS) * HOUR_MS;
+        if (!byHour.has(key)) byHour.set(key, { powerSum: 0, count: 0, energy: 0 });
+        const b = byHour.get(key);
+        b.powerSum += parseFloat(r.avg_power || 0);
+        b.count += 1;
+        b.energy += parseFloat(r.energy_generated || 0);
+      });
+
+      // Pick the 24-hour window:
+      //  - "1d": rolling — from current-hour-23 to current-hour
+      //  - "custom": that calendar day 00:00–23:00
+      let startHourMs;
+      if (chartRange === "custom") {
+        const dt = new Date(`${customDate}T00:00:00`);
+        dt.setHours(0, 0, 0, 0);
+        startHourMs = dt.getTime();
+      } else {
+        const currentHour = Math.floor(Date.now() / HOUR_MS) * HOUR_MS;
+        startHourMs = currentHour - 23 * HOUR_MS;
+      }
+
+      const series = [];
+      for (let i = 0; i < 24; i++) {
+        const t = startHourMs + i * HOUR_MS;
+        const b = byHour.get(t);
+        series.push({
+          t,
+          time: format(new Date(t), "HH:mm"),
+          power: b && b.count ? b.powerSum / b.count : 0,
+          energy: b ? b.energy : 0,
+        });
+      }
+      return series;
     }
-    // 1mo — aggregate the hourly buckets into per-day chart points.
+    // 1w / 1mo — aggregate hourly records into per-day buckets, then render
+    // one bar for EVERY day in the window (7 or 30). Days with no telemetry
+    // render as 0-height bars so the X-axis spans the full requested range
+    // instead of just the days that happened to have data.
     const byDay = new Map();
     records.forEach((r) => {
       const d = new Date(r.measurement_time);
-      const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
       const dayStart = new Date(d);
       dayStart.setHours(0, 0, 0, 0);
-      if (!byDay.has(key))
-        byDay.set(key, { t: dayStart.getTime(), powerSum: 0, count: 0, energy: 0 });
+      const key = dayStart.getTime();
+      if (!byDay.has(key)) byDay.set(key, { powerSum: 0, count: 0, energy: 0 });
       const b = byDay.get(key);
       b.powerSum += parseFloat(r.avg_power || 0);
       b.count += 1;
       b.energy += parseFloat(r.energy_generated || 0);
     });
-    return [...byDay.values()]
-      .sort((a, b) => a.t - b.t)
-      .map((b) => ({
-        t: b.t,
-        time: format(new Date(b.t), "dd MMM"),
-        power: b.count ? b.powerSum / b.count : 0,
-        energy: b.energy,
-      }));
+
+    const days = currentRange.windowDay || 30;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const series = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const dayStart = new Date(today);
+      dayStart.setDate(dayStart.getDate() - i);
+      const t = dayStart.getTime();
+      const b = byDay.get(t);
+      series.push({
+        t,
+        time: format(new Date(t), "dd MMM"),
+        power: b && b.count ? b.powerSum / b.count : 0,
+        energy: b ? b.energy : 0,
+      });
+    }
+    return series;
   }, [currentRange, generationData, chartPgData]);
 
   const yUnit = currentRange.source === "pg" ? " W avg" : " W";
@@ -425,7 +483,7 @@ export default function InverterDetailsPage() {
                   bgClass="bg-yellow-100"
                 />
                 <StatusCard
-                  title="Delta"
+                  title="PF"
                   value={offline ? "0.00" : parseFloat(latestReading.delta || 0).toFixed(2)}
                   unit=""
                   icon={ArrowUpDown}

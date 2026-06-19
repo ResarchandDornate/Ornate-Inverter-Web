@@ -38,24 +38,6 @@ const RANGES = [
   { id: "30d",  label: "Last 30 days" },
 ];
 
-// Returns a naive ISO 8601 datetime string `YYYY-MM-DDTHH:mm:ss` (no ms, no Z)
-// because the backend's documented filter format is the naive form. The
-// timezone-suffixed form (`...Z`) was returning empty results.
-function getStartIso(range) {
-  const now = Date.now();
-  const map = {
-    "1h":  60 * 60,
-    "24h": 24 * 3600,
-    "7d":  7 * 86400,
-    "30d": 30 * 86400,
-  };
-  const secs = map[range];
-  if (!secs) return null;
-  const d = new Date(now - secs * 1000);
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
 export default function DashboardPage() {
   const { data: inverters = [], dataUpdatedAt } = useLiveInverters();
   const [liveSeries, setLiveSeries] = useState([]);
@@ -159,7 +141,7 @@ export default function DashboardPage() {
     queryKey: ["dashboardTodayEnergy", todayStr],
     queryFn: () =>
       getData(
-        `/inverter/power-generation/?start=${todayStr}T00:00:00&end=${todayStr}T23:59:59&ordering=measurement_time`
+        `/inverter/power-generation/?date=${todayStr}&ordering=measurement_time`
       ),
     refetchInterval: 5 * 60 * 1000,
     staleTime: 2 * 60 * 1000,
@@ -169,36 +151,36 @@ export default function DashboardPage() {
     0
   );
 
-  // Historical aggregates from /power-generation/ (for the chart range tabs).
-  //
-  // CRITICAL: getStartIso() calls Date.now() — if called inline each render
-  // the seconds component changes the queryKey on every re-render, which makes
-  // TanStack Query treat it as a fresh query and re-fire the request. That
-  // loop is exactly what was hammering the backend. Memoize on `range` only.
-  const startIso = useMemo(() => getStartIso(range), [range]);
+  // Map our internal range ids to the backend's `range=` preset values.
+  //   "24h" → 1d        "7d" → 1w        "30d" → 1m
+  const pgRangeParam = useMemo(() => {
+    if (range === "24h") return "1d";
+    if (range === "7d") return "1w";
+    if (range === "30d") return "1m";
+    return null;
+  }, [range]);
 
   // Historical aggregates from /power-generation/ — used by 24h / 7d / 30d.
   const { data: pgData, isLoading: pgLoading, error: pgError } = useQuery({
-    queryKey: ["powerGenerationRange", range, startIso],
+    queryKey: ["powerGenerationRange", range],
     queryFn: () =>
       getData(
-        `/inverter/power-generation/?start=${startIso}&ordering=measurement_time&limit=5000`
+        `/inverter/power-generation/?range=${pgRangeParam}&ordering=measurement_time&limit=5000`
       ),
-    enabled: (range === "24h" || range === "7d" || range === "30d") && !!startIso,
+    enabled: !!pgRangeParam,
     refetchInterval: 5 * 60 * 1000,
     staleTime: 2 * 60 * 1000,
   });
 
-  // Raw telemetry for the last hour — needed for the 1h tab because the
-  // /power-generation/ endpoint only stores HOURLY aggregates. We paginate
-  // through the last hour of /inverter-data/ across the whole fleet, then
-  // bucket client-side into 10-minute groups.
+  // Raw telemetry for the last hour — /power-generation/ only stores HOURLY
+  // aggregates, so we paginate through /inverter-data/?range=1d and filter
+  // client-side to the last 60 minutes, then bucket into 10-minute groups.
   const { data: oneHourData, isLoading: oneHourLoading, error: oneHourError } = useQuery({
-    queryKey: ["dashboard1hRaw", startIso],
+    queryKey: ["dashboard1hRaw"],
     queryFn: async () => {
       const allData = [];
-      const baseUrl = `/inverter/inverter-data/?start=${startIso}&ordering=-timestamp`;
-      const MAX_PAGES = 12; // up to 1200 records — plenty for 1h × small fleet
+      const baseUrl = `/inverter/inverter-data/?range=1d&ordering=-timestamp`;
+      const MAX_PAGES = 12;
       for (let page = 1; page <= MAX_PAGES; page++) {
         const url = page === 1 ? baseUrl : `${baseUrl}&page=${page}`;
         let response;
@@ -212,9 +194,11 @@ export default function DashboardPage() {
         allData.push(...results);
         if (!response.next) break;
       }
-      return allData;
+      // Keep only the last 60 minutes for the 1h chart bucket grouping.
+      const oneHourAgo = Date.now() - 60 * 60 * 1000;
+      return allData.filter((r) => new Date(r.timestamp).getTime() >= oneHourAgo);
     },
-    enabled: range === "1h" && !!startIso,
+    enabled: range === "1h",
     refetchInterval: 60 * 1000,
     staleTime: 50 * 1000,
   });

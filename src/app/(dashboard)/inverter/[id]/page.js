@@ -48,11 +48,6 @@ const CHART_RANGES = [
   { id: "custom", label: "Custom date",   source: "pg",                 bucketKind: "hour" },
 ];
 
-function isoNoZ(d) {
-  const pad = (n) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
 export default function InverterDetailsPage() {
   const { id: inverterId } = useParams();
   const [tab, setTab] = useState("overview");
@@ -111,7 +106,7 @@ export default function InverterDetailsPage() {
     queryKey: ["inverterDailyEnergy", inverterId, todayStr],
     queryFn: () =>
       getData(
-        `/inverter/power-generation/?inverter=${inverterId}&start=${todayStr}T00:00:00&end=${todayStr}T23:59:59&ordering=measurement_time`
+        `/inverter/power-generation/?inverter=${inverterId}&date=${todayStr}&ordering=measurement_time`
       ),
     enabled: !!inverterId,
     refetchInterval: 30000,
@@ -153,32 +148,30 @@ export default function InverterDetailsPage() {
 
   const currentRange = CHART_RANGES.find((r) => r.id === chartRange) || CHART_RANGES[0];
 
-  // Compute start/end for the power-generation query (1d / 1w / 1mo / custom)
-  const pgRangeStart = useMemo(() => {
+  // Build the backend filter string. The API now accepts these preset params
+  // directly so we no longer have to compute ISO datetimes client-side:
+  //   range=1d|1w|1m|3m|6m|1y   — "last N period from now"
+  //   date=YYYY-MM-DD            — single calendar day (for custom-date picker)
+  const pgQueryFilter = useMemo(() => {
     if (currentRange.source !== "pg") return null;
-    if (chartRange === "custom") return `${customDate}T00:00:00`;
-    const now = new Date();
-    const past = new Date(now);
-    if (currentRange.windowHr) past.setHours(past.getHours() - currentRange.windowHr);
-    else if (currentRange.windowDay) past.setDate(past.getDate() - currentRange.windowDay);
-    return isoNoZ(past);
+    switch (chartRange) {
+      case "1d":     return "range=1d";
+      case "1w":     return "range=1w";
+      case "1mo":    return "range=1m";
+      case "custom": return `date=${customDate}`;
+      default:       return null;
+    }
   }, [chartRange, customDate, currentRange]);
 
-  const pgRangeEnd = useMemo(() => {
-    if (chartRange === "custom") return `${customDate}T23:59:59`;
-    return null;
-  }, [chartRange, customDate]);
-
   const { data: chartPgData, isLoading: chartPgLoading } = useQuery({
-    queryKey: ["chartPg", inverterId, chartRange, pgRangeStart, pgRangeEnd],
+    queryKey: ["chartPg", inverterId, chartRange, customDate],
     queryFn: () =>
       getData(
         `/inverter/power-generation/?inverter=${inverterId}` +
-          `&start=${pgRangeStart}` +
-          (pgRangeEnd ? `&end=${pgRangeEnd}` : "") +
+          `&${pgQueryFilter}` +
           `&ordering=measurement_time&limit=5000`
       ),
-    enabled: !!inverterId && !!pgRangeStart,
+    enabled: !!inverterId && !!pgQueryFilter,
     refetchInterval: 5 * 60 * 1000,
     staleTime: 2 * 60 * 1000,
   });

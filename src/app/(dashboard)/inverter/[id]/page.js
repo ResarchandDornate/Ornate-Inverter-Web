@@ -439,18 +439,6 @@ export default function InverterDetailsPage() {
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <StatusBadge status={status} />
-            {/* Auto-update indicator — pulses while a refetch is in flight,
-                otherwise just shows that the page is live-updating. */}
-            <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full border border-green-100 bg-green-50">
-              <span
-                className={`w-1.5 h-1.5 rounded-full bg-green-500 ${
-                  isRefetching ? "animate-ping" : "animate-pulse"
-                }`}
-              />
-              <span className="text-[10px] font-bold uppercase tracking-widest text-green-700">
-                {isRefetching ? "Updating" : "Live"}
-              </span>
-            </div>
             <button
               onClick={() => exportReadingsToCsv(generationData, inverterId)}
               disabled={!generationData.length}

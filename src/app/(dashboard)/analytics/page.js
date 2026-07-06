@@ -4,8 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
-  AreaChart,
-  Area,
   BarChart,
   Bar,
   XAxis,
@@ -13,7 +11,6 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Cell,
 } from "recharts";
 import { Zap, Activity, TrendingUp, Calendar, BatteryCharging, Thermometer } from "lucide-react";
 import { getData } from "@/lib/api";
@@ -196,13 +193,7 @@ export default function AnalyticsPage() {
                 </div>
               ) : (
                 <ResponsiveContainer>
-                  <AreaChart data={liveSeries} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="liveGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#E97451" stopOpacity={0.35} />
-                        <stop offset="95%" stopColor="#E97451" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
+                  <BarChart data={liveSeries} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
                     <XAxis
                       dataKey="time"
@@ -219,17 +210,14 @@ export default function AnalyticsPage() {
                       formatter={(v) => [`${Number(v).toFixed(0)} W`, "Total Power"]}
                       contentStyle={{ fontSize: 12, borderRadius: 8 }}
                     />
-                    <Area
-                      type="monotone"
+                    <Bar
                       dataKey="power"
                       name="Power (W)"
-                      stroke="#E97451"
-                      strokeWidth={2.5}
-                      fill="url(#liveGradient)"
-                      dot={false}
-                      activeDot={{ r: 4, fill: "#E97451" }}
+                      fill="#E97451"
+                      radius={[3, 3, 0, 0]}
+                      maxBarSize={20}
                     />
-                  </AreaChart>
+                  </BarChart>
                 </ResponsiveContainer>
               )}
             </div>
@@ -271,11 +259,7 @@ export default function AnalyticsPage() {
                     }}
                     contentStyle={{ fontSize: 12, borderRadius: 8 }}
                   />
-                  <Bar dataKey="energy" radius={[4, 4, 0, 0]} maxBarSize={42}>
-                    {hourlyChart.map((_, i) => (
-                      <Cell key={i} fill="#E97451" opacity={Math.max(0.6, 1 - (hourlyChart.length - 1 - i) * 0.02)} />
-                    ))}
-                  </Bar>
+                  <Bar dataKey="energy" fill="#E97451" radius={[4, 4, 0, 0]} maxBarSize={42} />
                 </BarChart>
               </ResponsiveContainer>
             </div>

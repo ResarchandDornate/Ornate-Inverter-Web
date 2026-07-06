@@ -48,7 +48,8 @@ export default function AnalyticsPage() {
         second: "2-digit",
         hour12: false,
       }),
-      power: totalPower,
+      // Values below 1 W are standby noise — store as null so no bar is drawn.
+      power: totalPower >= 1 ? totalPower : null,
       online,
     };
     setLiveSeries((prev) => [...prev.slice(-(MAX_LIVE_SAMPLES - 1)), point]);

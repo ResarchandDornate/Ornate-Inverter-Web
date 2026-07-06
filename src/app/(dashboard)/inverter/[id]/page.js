@@ -250,6 +250,8 @@ export default function InverterDetailsPage() {
   //  10m → raw 5s samples, 1h → per-minute averages,
   //  1d/1w/custom → per hour, 1mo → per day (aggregated from hourly buckets).
   const chartData = useMemo(() => {
+    const MIN_W = 1; // values below 1 W are standby noise — hide from chart
+
     if (currentRange.source === "raw") {
       const cutoff = Date.now() - currentRange.windowMin * 60 * 1000;
       const filtered = generationData
@@ -261,16 +263,14 @@ export default function InverterDetailsPage() {
         .sort((a, b) => a.t - b.t);
 
       if (!currentRange.bucketSec) {
-        // 10m view — raw samples, every reading is its own point.
+        // 10m view — raw samples. Null out noise so no bar is drawn.
         return filtered.map((d) => ({
           t: d.t,
           time: format(new Date(d.t), "HH:mm:ss"),
-          power: d.power,
+          power: d.power >= MIN_W ? d.power : null,
         }));
       }
-      // 1h view — one bar per minute for the FULL last hour. Minutes with no
-      // telemetry render as 0-height bars so the X-axis still shows every
-      // minute slot in order (instead of just the few that happen to have data).
+      // 1h view — one bar per minute. Null out minute-averages below threshold.
       const bucketMs = currentRange.bucketSec * 1000;
       const buckets = new Map();
       filtered.forEach(({ t, power }) => {
@@ -287,10 +287,11 @@ export default function InverterDetailsPage() {
       const series = [];
       for (let t = firstSlot; t <= lastSlot; t += bucketMs) {
         const b = buckets.get(t);
+        const avg = b ? b.sum / b.count : 0;
         series.push({
           t,
           time: format(new Date(t), "HH:mm"),
-          power: b ? b.sum / b.count : 0,
+          power: avg >= MIN_W ? avg : null,
         });
       }
       return series;
@@ -332,10 +333,11 @@ export default function InverterDetailsPage() {
       for (let i = 0; i < 24; i++) {
         const t = startHourMs + i * HOUR_MS;
         const b = byHour.get(t);
+        const avg = b && b.count ? b.powerSum / b.count : 0;
         series.push({
           t,
           time: format(new Date(t), "HH:mm"),
-          power: b && b.count ? b.powerSum / b.count : 0,
+          power: avg >= MIN_W ? avg : null,
           energy: b ? b.energy : 0,
         });
       }
@@ -367,10 +369,11 @@ export default function InverterDetailsPage() {
       dayStart.setDate(dayStart.getDate() - i);
       const t = dayStart.getTime();
       const b = byDay.get(t);
+      const dayAvg = b && b.count ? b.powerSum / b.count : 0;
       series.push({
         t,
         time: format(new Date(t), "dd MMM"),
-        power: b && b.count ? b.powerSum / b.count : 0,
+        power: dayAvg >= MIN_W ? dayAvg : null,
         energy: b ? b.energy : 0,
       });
     }

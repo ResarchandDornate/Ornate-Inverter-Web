@@ -70,10 +70,11 @@ export function useLiveInverters() {
 
       return enriched;
     },
-    // Slower poll + long staleTime so navigating between pages doesn't
-    // re-fire the request, and refetchOnMount: false ensures shared cache.
-    refetchInterval: 15000,
-    staleTime: 14000,
+    // 10 s poll — backend's offline threshold is 30 s (6 missed 5-s ESP32
+    // messages). Polling faster than that means we catch a flip within one
+    // cycle instead of potentially missing an online→offline→online round-trip.
+    refetchInterval: 10000,
+    staleTime: 9000,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
   });

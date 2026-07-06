@@ -160,9 +160,9 @@ export default function InverterDetailsPage() {
       return allData;
     },
     enabled: !!inverterId,
-    // Fast polling so the chart + Detailed Readings table feel live.
-    refetchInterval: 15000,
-    staleTime: 12000,
+    // 10 s matches useLiveInverters so status + telemetry flip in the same cycle.
+    refetchInterval: 10000,
+    staleTime: 9000,
     gcTime: 30 * 60 * 1000,          // keep 24h of readings cached for 30 min after unmount
     refetchOnWindowFocus: false,
   });

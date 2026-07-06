@@ -1,9 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
 import {
+  AreaChart,
+  Area,
   BarChart,
   Bar,
   XAxis,
@@ -28,7 +30,32 @@ export default function AnalyticsPage() {
   const [date, setDate] = useState(todayStr);
   const isToday = date === todayStr;
 
-  const { data: inverters = [] } = useLiveInverters();
+  const { data: inverters = [], dataUpdatedAt } = useLiveInverters();
+
+  // Rolling live chart — accumulate one point every time useLiveInverters polls (every 15 s).
+  const MAX_LIVE_SAMPLES = 60; // 15 min window at 15 s interval
+  const [liveSeries, setLiveSeries] = useState([]);
+  const lastUpdatedRef = useRef(null);
+
+  useEffect(() => {
+    if (!dataUpdatedAt || !isToday) return;
+    if (lastUpdatedRef.current === dataUpdatedAt) return; // deduplicate
+    lastUpdatedRef.current = dataUpdatedAt;
+
+    const totalPower = inverters.reduce((s, i) => s + Number(i.power_out ?? 0), 0);
+    const online = inverters.filter((i) => i.grid_connected === true).length;
+    const point = {
+      time: new Date(dataUpdatedAt).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }),
+      power: totalPower,
+      online,
+    };
+    setLiveSeries((prev) => [...prev.slice(-(MAX_LIVE_SAMPLES - 1)), point]);
+  }, [dataUpdatedAt, inverters, isToday]);
 
   // Hourly aggregates from /api/inverter/power-generation/ for the chosen date.
   // Backend computes energy_generated (kWh) and avg_power (W) per hour bucket.
@@ -146,6 +173,68 @@ export default function AnalyticsPage() {
             accent={onlineCount === inverters.length && inverters.length > 0 ? "green" : "slate"}
           />
         </section>
+
+        {/* Live rolling power chart — today only */}
+        {isToday && (
+          <section className="bg-white rounded-xl border border-slate-200 p-5 mb-4">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Live Power Output</h3>
+                <p className="text-xs text-slate-500">
+                  Total fleet power (W) · updates every 15 s · last {liveSeries.length} samples
+                </p>
+              </div>
+              <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-green-50 border border-green-100">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                <span className="text-[10px] font-bold text-green-700 uppercase tracking-widest">Live</span>
+              </div>
+            </div>
+            <div style={{ width: "100%", height: 280 }}>
+              {liveSeries.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-sm text-slate-400">
+                  Waiting for first sample…
+                </div>
+              ) : (
+                <ResponsiveContainer>
+                  <AreaChart data={liveSeries} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="liveGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#E97451" stopOpacity={0.35} />
+                        <stop offset="95%" stopColor="#E97451" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                    <XAxis
+                      dataKey="time"
+                      tick={{ fontSize: 10, fill: "#6B7280" }}
+                      minTickGap={30}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 10, fill: "#6B7280" }}
+                      unit=" W"
+                      domain={[0, "auto"]}
+                      width={65}
+                    />
+                    <Tooltip
+                      formatter={(v) => [`${Number(v).toFixed(0)} W`, "Total Power"]}
+                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey="power"
+                      name="Power (W)"
+                      stroke="#E97451"
+                      strokeWidth={2.5}
+                      fill="url(#liveGradient)"
+                      dot={false}
+                      activeDot={{ r: 4, fill: "#E97451" }}
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+          </section>
+        )}
 
         {/* Hourly energy chart */}
         <section className="bg-white rounded-xl border border-slate-200 p-5 mb-4">

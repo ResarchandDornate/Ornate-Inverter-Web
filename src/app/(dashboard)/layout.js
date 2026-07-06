@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { isAuthenticated } from "@/lib/auth";
 import Sidebar from "@/components/Sidebar";
+import Chatbot from "@/components/Chatbot";
 
 // Shared layout for every authenticated portal page.
 export default function DashboardGroupLayout({ children }) {
@@ -30,6 +31,7 @@ export default function DashboardGroupLayout({ children }) {
     <div className="min-h-screen flex bg-slate-50">
       <Sidebar />
       <div className="flex-1 min-w-0 flex flex-col">{children}</div>
+      <Chatbot />
     </div>
   );
 }

@@ -55,7 +55,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 py-8 bg-gradient-to-br from-orange-100 via-rose-100 to-amber-100">
+    <div className="min-h-screen flex items-center justify-center px-4 py-8 bg-linear-to-br from-orange-100 via-rose-100 to-amber-100">
       <form
         onSubmit={handleLogin}
         className="w-full max-w-md bg-white rounded-3xl p-8 shadow-2xl"
@@ -114,7 +114,7 @@ export default function LoginPage() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full py-4 rounded-xl bg-gradient-to-r from-orange-500 to-red-600 text-white font-bold text-lg flex items-center justify-center disabled:opacity-60 hover:opacity-95 transition"
+          className="w-full py-4 rounded-xl bg-linear-to-r from-orange-500 to-red-600 text-white font-bold text-lg flex items-center justify-center disabled:opacity-60 hover:opacity-95 transition"
         >
           {loading ? <Loader2 className="animate-spin" /> : "Sign In Securely"}
         </button>

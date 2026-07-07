@@ -21,14 +21,10 @@ export default function Chatbot() {
   const bottomRef = useRef(null);
   const inputRef = useRef(null);
 
-  // Scroll to bottom whenever messages change or panel opens
   useEffect(() => {
-    if (open) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
+    if (open) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, open]);
 
-  // Focus input when panel opens
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 100);
   }, [open]);
@@ -121,18 +117,34 @@ export default function Chatbot() {
     }
   };
 
+  const canSend = inputText.trim() && !loading;
+
   return (
     <>
       <style>{`.chat-messages::-webkit-scrollbar{display:none}`}</style>
-      {/* Floating panel */}
+
+      {/* ── Chat panel ── */}
       {open && (
-        <div className="fixed bottom-24 right-6 z-50 w-80 sm:w-96 flex flex-col bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden"
-          style={{ maxHeight: "70vh" }}>
+        <div
+          className="
+            fixed z-50 flex flex-col bg-white shadow-2xl border border-slate-200 overflow-hidden
+            /* mobile: stretch edge-to-edge near bottom */
+            inset-x-2 bottom-18 top-14 rounded-2xl
+            /* sm: fixed-width card, lifted above FAB */
+            sm:inset-x-auto sm:top-auto sm:right-4 sm:bottom-22 sm:w-80 sm:max-h-[70vh]
+            /* md: slightly wider */
+            md:right-6 md:w-88
+            /* lg: comfortable width on big monitors */
+            lg:w-104 lg:max-h-[75vh]
+          "
+        >
           {/* Header */}
-          <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100">
+          <div className="flex items-center gap-3 px-4 py-3 bg-white border-b border-slate-100 shrink-0">
             <div className="w-9 h-9 rounded-full bg-[#E97451] flex items-center justify-center shrink-0">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /><line x1="2" y1="12" x2="22" y2="12" />
+                <circle cx="12" cy="12" r="10" />
+                <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                <line x1="2" y1="12" x2="22" y2="12" />
               </svg>
             </div>
             <div className="flex-1 min-w-0">
@@ -142,13 +154,23 @@ export default function Chatbot() {
                 <span className="text-[10px] text-slate-500">Always online</span>
               </div>
             </div>
-            <button onClick={() => setOpen(false)} className="text-slate-400 hover:text-slate-600 transition p-1 rounded-lg hover:bg-slate-100">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+            <button
+              onClick={() => setOpen(false)}
+              className="text-slate-400 hover:text-slate-600 transition p-1.5 rounded-lg hover:bg-slate-100"
+              aria-label="Close chat"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
             </button>
           </div>
 
           {/* Messages */}
-          <div className="chat-messages flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50" style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}>
+          <div
+            className="chat-messages flex-1 overflow-y-auto p-3 sm:p-4 space-y-3 sm:space-y-4 bg-slate-50"
+            style={{ scrollbarWidth: "none", msOverflowStyle: "none" }}
+          >
             {messages.map((msg) => {
               const isBot = msg.sender === "bot";
               return (
@@ -175,12 +197,14 @@ export default function Chatbot() {
                       {isBot && (
                         <button
                           onClick={() => handleTranslate(msg.id, msg.text)}
-                          className="text-[10px] flex items-center gap-0.5 hover:text-[#E97451] transition"
+                          className="text-[10px] flex items-center gap-0.5 transition"
                           style={{ color: msg.showTranslated ? "#E97451" : "#9CA3AF" }}
                           title="Translate to Hindi"
                         >
                           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" /><path d="M2 5h12" /><path d="M7 2h1" /><path d="m22 22-5-10-5 10" /><path d="M14 18h6" />
+                            <path d="m5 8 6 6" /><path d="m4 14 6-6 2-3" />
+                            <path d="M2 5h12" /><path d="M7 2h1" />
+                            <path d="m22 22-5-10-5 10" /><path d="M14 18h6" />
                           </svg>
                           {msg.showTranslated ? "Original" : "हिंदी"}
                         </button>
@@ -207,8 +231,8 @@ export default function Chatbot() {
             <div ref={bottomRef} />
           </div>
 
-          {/* Input */}
-          <div className="px-3 py-3 bg-white border-t border-slate-100 flex items-center gap-2">
+          {/* Input bar */}
+          <div className="px-3 py-3 bg-white border-t border-slate-100 flex items-center gap-2 shrink-0">
             <input
               ref={inputRef}
               type="text"
@@ -217,45 +241,54 @@ export default function Chatbot() {
               onKeyDown={handleKeyDown}
               placeholder="Ask about your energy…"
               disabled={loading}
-              className="flex-1 bg-slate-100 rounded-full px-4 py-2 text-sm text-slate-800 placeholder-slate-400 outline-none focus:ring-2 focus:ring-orange-300 transition disabled:opacity-50"
+              className="flex-1 bg-slate-100 rounded-full px-4 py-2.5 text-sm text-slate-800 placeholder-slate-400 outline-none focus:ring-2 focus:ring-orange-300 transition disabled:opacity-50"
             />
             <button
               onClick={handleSend}
-              disabled={!inputText.trim() || loading}
-              className="w-9 h-9 rounded-full flex items-center justify-center transition shrink-0"
-              style={{
-                backgroundColor: !inputText.trim() || loading ? "#F3F4F6" : "#E97451",
-              }}
+              disabled={!canSend}
+              className="w-10 h-10 rounded-full flex items-center justify-center transition shrink-0 active:scale-95"
+              style={{ backgroundColor: canSend ? "#E97451" : "#F3F4F6" }}
+              aria-label="Send"
             >
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
-                stroke={!inputText.trim() || loading ? "#9CA3AF" : "white"}
+              <svg
+                width="15" height="15" viewBox="0 0 24 24" fill="none"
+                stroke={canSend ? "white" : "#9CA3AF"}
                 strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"
-                style={{ transform: "translateX(1px)" }}>
-                <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+                style={{ transform: "translateX(1px)" }}
+              >
+                <line x1="22" y1="2" x2="11" y2="13" />
+                <polygon points="22 2 15 22 11 13 2 9 22 2" />
               </svg>
             </button>
           </div>
         </div>
       )}
 
-      {/* FAB toggle button */}
+      {/* ── FAB ───────────────────────────────────────────────────────────── */}
       <button
         onClick={() => setOpen((v) => !v)}
-        className="fixed bottom-6 right-6 z-50 w-14 h-14 rounded-full bg-[#E97451] shadow-lg flex items-center justify-center transition hover:scale-105 active:scale-95"
+        className="
+          fixed z-50 rounded-full bg-[#E97451] shadow-lg flex items-center justify-center
+          transition hover:scale-105 active:scale-95
+          /* mobile: smaller, close to corner */
+          bottom-4 right-4 w-12 h-12
+          /* sm+: standard size */
+          sm:bottom-6 sm:right-6 sm:w-14 sm:h-14
+        "
         aria-label={open ? "Close chat" : "Open Solar AI chat"}
       >
         {open ? (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
-            <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
         ) : (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
         )}
-        {/* Unread pulse — shown only when closed and there's more than the welcome message */}
         {!open && messages.length > 1 && (
-          <span className="absolute top-1 right-1 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
+          <span className="absolute top-0.5 right-0.5 w-3 h-3 bg-green-500 rounded-full border-2 border-white" />
         )}
       </button>
     </>

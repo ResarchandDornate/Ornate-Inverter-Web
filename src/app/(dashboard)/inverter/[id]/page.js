@@ -200,6 +200,13 @@ export default function InverterDetailsPage() {
     grid_connected: gridStatusData?.grid_connected ?? latestReading.grid_connected,
   };
   const gridConnected = merged.grid_connected ?? null;
+  // The "Grid Status" card shows the *physical* grid connection reported by the
+  // latest /inverter/inverter-data/ telemetry record — NOT the online/offline
+  // derivation (an inverter can be grid-connected while producing ~0 W at night)
+  // and NOT the /grid_status/ summary, which can lag the raw reading. Drive it
+  // straight off the response field so ON/OFF always matches `grid_connected`.
+  const readingGridConnected =
+    latestReading.grid_connected === undefined ? null : latestReading.grid_connected;
   // Use the same priority ordering as computeStatus(): trust the explicit
   // `status` field first (it reflects the backend's "offline after 10+ min
   // of zero power" rule), then is_online, then grid_connected. This makes
@@ -419,7 +426,7 @@ export default function InverterDetailsPage() {
       <main className="flex-1 px-6 py-6 max-w-[1600px] w-full">
         {/* Hero status card */}
         <section className="bg-white rounded-xl border border-slate-200 p-5 mb-4 flex flex-wrap items-center gap-6">
-          <div className="flex items-center gap-4 flex-1 min-w-[240px]">
+          <div className="flex items-center gap-4 flex-1 min-w-60">
             <div className={`w-14 h-14 rounded-xl flex items-center justify-center ${
               hasFault ? "bg-red-50" : gridConnected ? "bg-green-50" : "bg-slate-100"
             }`}>
@@ -525,11 +532,11 @@ export default function InverterDetailsPage() {
                 />
                 <StatusCard
                   title="Grid Status"
-                  value={offline ? "OFF" : gridConnected === null ? "..." : gridConnected ? "ON" : "OFF"}
+                  value={readingGridConnected === null ? "..." : readingGridConnected ? "ON" : "OFF"}
                   unit=""
-                  icon={offline || !gridConnected ? AlertCircle : Save}
-                  color={offline || !gridConnected ? "#EF4444" : "#10B981"}
-                  bgClass={offline || !gridConnected ? "bg-red-100" : "bg-green-100"}
+                  icon={readingGridConnected ? Save : AlertCircle}
+                  color={readingGridConnected ? "#10B981" : "#EF4444"}
+                  bgClass={readingGridConnected ? "bg-green-100" : "bg-red-100"}
                 />
                 <StatusCard
                   title="VPV"
@@ -744,7 +751,7 @@ export default function InverterDetailsPage() {
                     <h3 className="text-base font-bold text-slate-900">Detailed Readings</h3>
                     <span className="text-xs text-slate-500">{generationData.length} entries</span>
                   </div>
-                  <div className="overflow-y-auto max-h-[500px]">
+                  <div className="overflow-y-auto max-h-125">
                     <table className="w-full text-sm">
                       <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500 sticky top-0">
                         <tr>

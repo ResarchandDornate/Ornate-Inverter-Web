@@ -32,7 +32,12 @@ import { QUERY_KEYS } from "@/lib/queryKeys";
 import Topbar from "@/components/Topbar";
 import StatusBadge from "@/components/StatusBadge";
 import StatusCard from "@/components/StatusCard";
-import { computeStatus, formatLastSeen } from "@/lib/inverterStatus";
+import {
+  computeStatus,
+  formatLastSeen,
+  parseFaultBitmask,
+  hasActiveFault,
+} from "@/lib/inverterStatus";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -69,6 +74,7 @@ function exportReadingsToCsv(records, inverterId) {
     "Temperature (°C)",
     "Grid Connected",
     "Fault Bitmask",
+    "HW Fault",
   ];
 
   const rows = records.map((r) => [
@@ -79,10 +85,11 @@ function exportReadingsToCsv(records, inverterId) {
     Number(r.power_in ?? 0).toFixed(2),
     Number(r.vpv ?? 0).toFixed(2),
     Number(r.ipv ?? 0).toFixed(2),
-    Number(r.delta ?? 0).toFixed(2),
+    Number(r.power_factor ?? r.delta ?? 0).toFixed(2),
     r.temperature ?? "",
     r.grid_connected ? "Yes" : "No",
     r.fault_bitmask ?? 0,
+    r.hw_fault ? "Yes" : "No",
   ]);
 
   const escape = (cell) => {
@@ -216,8 +223,8 @@ export default function InverterDetailsPage() {
     merged.status === "offline" ||
     merged.is_online === false ||
     gridConnected === false;
-  const bitmask = Number(latestReading.fault_bitmask ?? 0);
-  const hasFault = bitmask > 0;
+  const bitmask = parseFaultBitmask(latestReading.fault_bitmask);
+  const hasFault = hasActiveFault(latestReading);
   const status = computeStatus(merged);
 
   const currentRange = CHART_RANGES.find((r) => r.id === chartRange) || CHART_RANGES[0];
@@ -556,7 +563,7 @@ export default function InverterDetailsPage() {
                 />
                 <StatusCard
                   title="PF"
-                  value={offline ? "0.00" : parseFloat(latestReading.delta || 0).toFixed(2)}
+                  value={offline ? "0.00" : parseFloat(latestReading.power_factor ?? latestReading.delta ?? 0).toFixed(2)}
                   unit=""
                   icon={ArrowUpDown}
                   color="#6366F1"

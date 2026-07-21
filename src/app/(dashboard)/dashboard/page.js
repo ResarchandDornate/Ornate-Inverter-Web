@@ -25,7 +25,13 @@ import Topbar from "@/components/Topbar";
 import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
 import { useLiveInverters } from "@/hooks/useLiveInverters";
-import { computeStatus } from "@/lib/inverterStatus";
+import {
+  computeStatus,
+  hasActiveFault,
+  isHwFault,
+  parseFaultBitmask,
+  formatFaultBitmask,
+} from "@/lib/inverterStatus";
 import WeatherWidget from "@/components/WeatherWidget";
 
 const MAX_LIVE_SAMPLES = 30; // ~5 min @ 10s polling
@@ -107,7 +113,7 @@ export default function DashboardPage() {
     (s, i) => (isReporting(i) ? s + Number(i.power_out ?? 0) : s),
     0
   );
-  const faultCount = inverters.filter((i) => Number(i.fault_bitmask ?? 0) > 0).length;
+  const faultCount = inverters.filter((i) => hasActiveFault(i)).length;
   const avgTemp = useMemo(() => {
     // Temperature is sensor data — once the inverter is offline the value
     // is stale, so it shouldn't pull the fleet average around.
@@ -580,11 +586,11 @@ export default function DashboardPage() {
             <ul className="space-y-2.5 max-h-[210px] overflow-y-auto scrollbar-thin pr-1">
               {(faultCount > 0
                 ? inverters
-                    .filter((i) => Number(i.fault_bitmask ?? 0) > 0)
+                    .filter((i) => hasActiveFault(i))
                     .map((i) => ({
                       type: "fault",
                       title: `Fault on ${i.name}`,
-                      detail: `Bitmask 0x${Number(i.fault_bitmask).toString(16).toUpperCase()}`,
+                      detail: `Bitmask ${formatFaultBitmask(i.fault_bitmask)}${isHwFault(i) ? " · HW fault" : ""}`,
                       time: "now",
                     }))
                 : onlineCount === 0
@@ -659,7 +665,8 @@ export default function DashboardPage() {
               </thead>
               <tbody>
                 {inverters.slice(0, 6).map((inv) => {
-                  const bitmask = Number(inv.fault_bitmask ?? 0);
+                  const bitmask = parseFaultBitmask(inv.fault_bitmask);
+                  const faulted = hasActiveFault(inv);
                   const status = computeStatus(inv);
                   return (
                     <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
@@ -673,8 +680,8 @@ export default function DashboardPage() {
                         {inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—"}
                       </td>
                       <td className="px-5 py-3 text-center">
-                        {bitmask > 0 ? (
-                          <span className="text-xs font-semibold text-red-600">0x{bitmask.toString(16).toUpperCase()}</span>
+                        {faulted ? (
+                          <span className="text-xs font-semibold text-red-600">{bitmask > 0 ? formatFaultBitmask(inv.fault_bitmask) : "HW"}</span>
                         ) : (
                           <span className="text-xs text-slate-400">—</span>
                         )}

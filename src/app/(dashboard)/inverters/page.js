@@ -6,7 +6,13 @@ import { Search, RefreshCw, Plus } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import StatusBadge from "@/components/StatusBadge";
 import { useLiveInverters } from "@/hooks/useLiveInverters";
-import { computeStatus, formatLastSeen } from "@/lib/inverterStatus";
+import {
+  computeStatus,
+  formatLastSeen,
+  parseFaultBitmask,
+  hasActiveFault,
+  formatFaultBitmask,
+} from "@/lib/inverterStatus";
 
 export default function InvertersListPage() {
   const [search, setSearch] = useState("");
@@ -99,7 +105,8 @@ export default function InvertersListPage() {
               </thead>
               <tbody>
                 {filtered.map((inv) => {
-                  const bitmask = Number(inv.fault_bitmask ?? 0);
+                  const bitmask = parseFaultBitmask(inv.fault_bitmask);
+                  const faulted = hasActiveFault(inv);
                   const status = computeStatus(inv);
                   return (
                     <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
@@ -125,9 +132,9 @@ export default function InvertersListPage() {
                         {inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—"}
                       </td>
                       <td className="px-5 py-3.5 text-center">
-                        {bitmask > 0 ? (
+                        {faulted ? (
                           <span className="text-xs font-mono font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded">
-                            0x{bitmask.toString(16).toUpperCase()}
+                            {bitmask > 0 ? formatFaultBitmask(inv.fault_bitmask) : "HW"}
                           </span>
                         ) : (
                           <span className="text-xs text-slate-300">—</span>

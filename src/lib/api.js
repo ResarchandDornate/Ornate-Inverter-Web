@@ -1,7 +1,7 @@
 import axios from "axios";
 import { getToken } from "./auth";
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://lab.ornatesolar.com/api/";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "https://inverter.unityess.cloud/api/";
 
 const axiosInstance = axios.create({
   baseURL: BASE_URL,
@@ -9,13 +9,18 @@ const axiosInstance = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+// Endpoints that must NOT carry an Authorization header (they run pre-login).
+// Names match the accounts app (`/api/auth/`): signin/signup, the OTP pair, and
+// the two password-reset steps. Note: the backend issues refresh tokens but has
+// no TokenRefreshView, so there is no `auth/token/refresh` to redeem — the app
+// re-logs in on 401 instead.
 const PUBLIC_AUTH_PATHS = [
   "auth/signin",
   "auth/signup",
-  "auth/register",
-  "auth/login",
-  "auth/token/refresh",
-  "auth/password/reset",
+  "auth/verify-otp",
+  "auth/send-otp",
+  "auth/reset-password",
+  "auth/confirm-reset-password",
 ];
 
 const isPublicAuthRequest = (url = "") => {

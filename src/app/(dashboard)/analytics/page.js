@@ -39,8 +39,12 @@ export default function AnalyticsPage() {
     if (lastUpdatedRef.current === dataUpdatedAt) return; // deduplicate
     lastUpdatedRef.current = dataUpdatedAt;
 
-    const totalPower = inverters.reduce((s, i) => s + Number(i.power_out ?? 0), 0);
-    const online = inverters.filter((i) => i.grid_connected === true).length;
+    // Same rule as the KPI cards below: only count inverters that are
+    // actually online right now, not whatever their last (possibly stale)
+    // reading said.
+    const onlineNow = inverters.filter((i) => computeStatus(i) === "online");
+    const totalPower = onlineNow.reduce((s, i) => s + Number(i.power_out ?? 0), 0);
+    const online = onlineNow.length;
     const point = {
       time: new Date(dataUpdatedAt).toLocaleTimeString([], {
         hour: "2-digit",
@@ -105,10 +109,17 @@ export default function AnalyticsPage() {
     0
   );
   const peakHourPower = hourlyChart.reduce((m, h) => Math.max(m, h.avgPower), 0);
-  const totalLivePower = inverters.reduce((s, i) => s + Number(i.power_out ?? 0), 0);
-  const onlineCount = inverters.filter((i) => i.grid_connected === true).length;
+  // Only count/sum inverters that are ACTUALLY online right now — `power_out`
+  // and `grid_connected` both come from each inverter's latest reading no
+  // matter how stale, so summing/counting them unconditionally overstates
+  // "live" power and online count using data that can be days old.
+  const onlineInverters = inverters.filter((i) => computeStatus(i) === "online");
+  const totalLivePower = onlineInverters.reduce((s, i) => s + Number(i.power_out ?? 0), 0);
+  const onlineCount = onlineInverters.length;
   const avgTemp = useMemo(() => {
-    const valid = inverters.filter((i) => i.temperature != null);
+    // Same rule as power/online above — an offline inverter's last-known
+    // temperature can be months old and shouldn't pull the fleet average.
+    const valid = inverters.filter((i) => computeStatus(i) === "online" && i.temperature != null);
     if (!valid.length) return 0;
     return valid.reduce((s, i) => s + Number(i.temperature), 0) / valid.length;
   }, [inverters]);
@@ -151,9 +162,9 @@ export default function AnalyticsPage() {
             accent="blue"
           />
           <KpiCard
-            label="Peak Hour Avg Power"
-            value={peakHourPower.toFixed(0)}
-            unit="W"
+            label="Peak Power"
+            value={(peakHourPower / 1000).toFixed(2)}
+            unit="kW"
             icon={TrendingUp}
             accent="indigo"
           />
@@ -282,7 +293,7 @@ export default function AnalyticsPage() {
                 <tr>
                   <th className="text-center px-5 py-3 font-semibold">Inverter</th>
                   <th className="text-center px-5 py-3 font-semibold">Energy (kWh)</th>
-                  <th className="text-center px-5 py-3 font-semibold">Peak Avg Power</th>
+                  <th className="text-center px-5 py-3 font-semibold">Peak Power (kW)</th>
                   <th className="text-center px-5 py-3 font-semibold">Live Power Out</th>
                   <th className="text-center px-5 py-3 font-semibold">Voltage</th>
                   <th className="text-center px-5 py-3 font-semibold">Temp</th>
@@ -295,6 +306,9 @@ export default function AnalyticsPage() {
                   .map((inv) => {
                     const agg = perInverterAgg[inv.id] || { energy: 0, peakAvgPower: 0 };
                     const status = computeStatus(inv);
+                    // Offline = stale reading — show 0 instead of a last-known
+                    // value that can be minutes to months old.
+                    const offline = status === "offline";
                     return (
                       <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50">
                         <td className="px-5 py-3 font-semibold text-slate-900">
@@ -308,16 +322,16 @@ export default function AnalyticsPage() {
                           {agg.energy.toFixed(3)}
                         </td>
                         <td className="px-5 py-3 text-center text-slate-700">
-                          {agg.peakAvgPower.toFixed(0)} W
+                          {(agg.peakAvgPower / 1000).toFixed(2)} kW
                         </td>
                         <td className="px-5 py-3 text-center font-semibold text-orange-600">
-                          {Number(inv.power_out ?? 0).toFixed(0)} W
+                          {offline ? 0 : Number(inv.power_out ?? 0).toFixed(0)} W
                         </td>
                         <td className="px-5 py-3 text-center text-slate-700">
-                          {inv.voltage != null ? `${Number(inv.voltage).toFixed(1)} V` : "—"}
+                          {offline ? "0.0 V" : (inv.voltage != null ? `${Number(inv.voltage).toFixed(1)} V` : "—")}
                         </td>
                         <td className="px-5 py-3 text-center text-slate-700">
-                          {inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—"}
+                          {offline ? "0.0 °C" : (inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—")}
                         </td>
                         <td className="px-5 py-3 text-center">
                           <StatusBadge status={status} />

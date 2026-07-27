@@ -108,6 +108,10 @@ export default function InvertersListPage() {
                   const bitmask = parseFaultBitmask(inv.fault_bitmask);
                   const faulted = hasActiveFault(inv);
                   const status = computeStatus(inv);
+                  // Offline means the reading is stale — show 0 / "—" instead
+                  // of the last-known values, which can be minutes to months
+                  // old and misleadingly look "live".
+                  const offline = status === "offline";
                   return (
                     <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
                       <td className="px-5 py-3.5">
@@ -123,13 +127,13 @@ export default function InvertersListPage() {
                         {formatLastSeen(inv.last_seen)}
                       </td>
                       <td className="px-5 py-3.5 text-center text-slate-700 font-semibold">
-                        {Number(inv.power_out ?? 0).toFixed(0)}
+                        {offline ? 0 : Number(inv.power_out ?? 0).toFixed(0)}
                       </td>
                       <td className="px-5 py-3.5 text-center text-slate-700">
-                        {inv.voltage != null ? `${Number(inv.voltage).toFixed(1)} V` : "—"}
+                        {offline ? "0.0 V" : (inv.voltage != null ? `${Number(inv.voltage).toFixed(1)} V` : "—")}
                       </td>
                       <td className="px-5 py-3.5 text-center text-slate-700">
-                        {inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—"}
+                        {offline ? "0.0 °C" : (inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—")}
                       </td>
                       <td className="px-5 py-3.5 text-center">
                         {faulted ? (

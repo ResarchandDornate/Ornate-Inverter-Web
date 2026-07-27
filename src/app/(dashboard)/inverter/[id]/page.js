@@ -85,7 +85,7 @@ function exportReadingsToCsv(records, inverterId) {
     Number(r.power_in ?? 0).toFixed(2),
     Number(r.vpv ?? 0).toFixed(2),
     Number(r.ipv ?? 0).toFixed(2),
-    Number(r.power_factor ?? r.delta ?? 0).toFixed(2),
+    Number(r.power_factor ?? r.delta ?? 0).toFixed(4),
     r.temperature ?? "",
     r.grid_connected ? "Yes" : "No",
     r.fault_bitmask ?? 0,
@@ -171,7 +171,10 @@ export default function InverterDetailsPage() {
     refetchInterval: 10000,
     staleTime: 9000,
     gcTime: 30 * 60 * 1000,          // keep 24h of readings cached for 30 min after unmount
-    refetchOnWindowFocus: false,
+    // This feeds latestReading (Voltage/Current/Temp/PF cards) — refetch on
+    // focus so it re-syncs immediately instead of waiting out a throttled
+    // background-tab poll, matching the list pages' useLiveInverters.
+    refetchOnWindowFocus: true,
   });
 
   // Real daily energy from backend hourly aggregates (accurate; survives
@@ -207,22 +210,24 @@ export default function InverterDetailsPage() {
     grid_connected: gridStatusData?.grid_connected ?? latestReading.grid_connected,
   };
   const gridConnected = merged.grid_connected ?? null;
-  // The "Grid Status" card shows the *physical* grid connection reported by the
-  // latest /inverter/inverter-data/ telemetry record — NOT the online/offline
-  // derivation (an inverter can be grid-connected while producing ~0 W at night)
-  // and NOT the /grid_status/ summary, which can lag the raw reading. Drive it
-  // straight off the response field so ON/OFF always matches `grid_connected`.
-  const readingGridConnected =
-    latestReading.grid_connected === undefined ? null : latestReading.grid_connected;
+  // Whether the inverter is offline based on connectivity alone (before
+  // factoring in the grid reading itself — needed below to decide the Grid
+  // Status card without circularity).
+  const offlineByConnectivity =
+    merged.status === "offline" || merged.is_online === false;
+  // The "Grid Status" card now follows the same offline rule as every other
+  // card: if the inverter isn't reporting, Grid shows OFF too, regardless of
+  // what the last (possibly days-old) reading said — a stale "grid was
+  // connected" reading is misleading once the device itself has gone dark.
+  const readingGridConnected = offlineByConnectivity
+    ? false
+    : (latestReading.grid_connected === undefined ? null : latestReading.grid_connected);
   // Use the same priority ordering as computeStatus(): trust the explicit
   // `status` field first (it reflects the backend's "offline after 10+ min
   // of zero power" rule), then is_online, then grid_connected. This makes
   // every per-card display flip together — Voltage, Current, Grid Status,
   // VPV/IPV/Delta all collapse to 0 / N/A / OFF when offline is true.
-  const offline =
-    merged.status === "offline" ||
-    merged.is_online === false ||
-    gridConnected === false;
+  const offline = offlineByConnectivity || gridConnected === false;
   const bitmask = parseFaultBitmask(latestReading.fault_bitmask);
   const hasFault = hasActiveFault(latestReading);
   const status = computeStatus(merged);
@@ -563,7 +568,7 @@ export default function InverterDetailsPage() {
                 />
                 <StatusCard
                   title="PF"
-                  value={offline ? "0.00" : parseFloat(latestReading.power_factor ?? latestReading.delta ?? 0).toFixed(2)}
+                  value={offline ? "0.0000" : parseFloat(latestReading.power_factor ?? latestReading.delta ?? 0).toFixed(4)}
                   unit=""
                   icon={ArrowUpDown}
                   color="#6366F1"
@@ -591,14 +596,14 @@ export default function InverterDetailsPage() {
                     <p className="text-xs text-slate-400 mt-0.5">kWh generated today</p>
                   </div>
                   <div className="bg-white rounded-xl border border-slate-200 p-4">
-                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Peak Hour</p>
-                    <p className="text-2xl font-bold text-orange-600">{peakHourPowerW.toFixed(0)}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">W hourly avg max</p>
+                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Peak Power</p>
+                    <p className="text-2xl font-bold text-orange-600">{(peakHourPowerW / 1000).toFixed(2)}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">kW hourly max</p>
                   </div>
                   <div className="bg-white rounded-xl border border-slate-200 p-4">
                     <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Avg Power</p>
-                    <p className="text-2xl font-bold text-slate-700">{avgPowerW.toFixed(0)}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">W average · {generationData.length} readings</p>
+                    <p className="text-2xl font-bold text-slate-700">{(avgPowerW / 1000).toFixed(2)}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">kW average · {generationData.length} readings</p>
                   </div>
                 </section>
 

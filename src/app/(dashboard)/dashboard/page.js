@@ -365,9 +365,9 @@ export default function DashboardPage() {
                   </p>
                 </div>
                 <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Peak Avg Power</p>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Peak Power</p>
                   <p className="text-lg font-black text-orange-600">
-                    {rangePeakPower.toFixed(0)} <span className="text-xs font-medium text-slate-400">W</span>
+                    {(rangePeakPower / 1000).toFixed(2)} <span className="text-xs font-medium text-slate-400">kW</span>
                   </p>
                 </div>
                 <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
@@ -498,13 +498,14 @@ export default function DashboardPage() {
                     />
                     <YAxis
                       tick={{ fontSize: 11, fill: "#6B7280" }}
-                      unit={isPowerView ? " W" : " kWh"}
+                      unit={isPowerView ? undefined : " kWh"}
+                      tickFormatter={isPowerView ? (v) => `${(Number(v) / 1000).toFixed(1)} kW` : undefined}
                       width={70}
                     />
                     <Tooltip
                       formatter={(v) =>
                         isPowerView
-                          ? [`${Number(v).toFixed(0)} W`, "Avg Power"]
+                          ? [`${(Number(v) / 1000).toFixed(2)} kW`, "Avg Power"]
                           : [`${Number(v).toFixed(3)} kWh`, "Energy"]
                       }
                       labelFormatter={(l) =>
@@ -668,16 +669,19 @@ export default function DashboardPage() {
                   const bitmask = parseFaultBitmask(inv.fault_bitmask);
                   const faulted = hasActiveFault(inv);
                   const status = computeStatus(inv);
+                  // Offline = stale reading — show 0 instead of a last-known
+                  // value that can be minutes to months old.
+                  const offline = status === "offline";
                   return (
                     <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
                       <td className="px-5 py-3 text-center font-semibold text-slate-900">{inv.name}</td>
                       <td className="px-5 py-3 text-center text-slate-500 font-mono text-xs">{inv.serial_number}</td>
                       <td className="px-5 py-3 text-center"><StatusBadge status={status} /></td>
                       <td className="px-5 py-3 text-center text-slate-700">
-                        {Number(inv.power_out ?? 0).toFixed(0)} W
+                        {offline ? 0 : Number(inv.power_out ?? 0).toFixed(0)} W
                       </td>
                       <td className="px-5 py-3 text-center text-slate-700">
-                        {inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—"}
+                        {offline ? "0.0 °C" : (inv.temperature != null ? `${Number(inv.temperature).toFixed(1)} °C` : "—")}
                       </td>
                       <td className="px-5 py-3 text-center">
                         {faulted ? (

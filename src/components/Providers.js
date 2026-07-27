@@ -12,7 +12,11 @@ export default function Providers({ children }) {
         defaultOptions: {
           queries: {
             staleTime: 5 * 1000,
-            refetchOnWindowFocus: false,
+            // Re-sync the instant a backgrounded tab/window regains focus —
+            // without this, a page left open while you're elsewhere can fall
+            // behind (browsers throttle timers in background tabs), making
+            // the same inverter show different values on different pages.
+            refetchOnWindowFocus: true,
           },
         },
       })

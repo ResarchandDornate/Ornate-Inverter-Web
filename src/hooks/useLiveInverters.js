@@ -77,7 +77,11 @@ export function useLiveInverters() {
     // cycle instead of potentially missing an online→offline→online round-trip.
     refetchInterval: 10000,
     staleTime: 9000,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
+    // Always fetch fresh on mount/focus — this hook backs the Dashboard,
+    // Inverters list, and Analytics pages, so serving a stale cached snapshot
+    // on navigation (or after a backgrounded tab's timers got throttled) is
+    // exactly what made the same inverter look different across pages.
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
   });
 }

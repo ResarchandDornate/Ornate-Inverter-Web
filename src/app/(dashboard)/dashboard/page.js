@@ -37,7 +37,6 @@ import WeatherWidget from "@/components/WeatherWidget";
 const MAX_LIVE_SAMPLES = 30; // ~5 min @ 10s polling
 
 const RANGES = [
-  { id: "live", label: "Live" },
   { id: "1h",   label: "Last 1 hour" },
   { id: "24h",  label: "Last 24h" },
   { id: "7d",   label: "Last 7 days" },
@@ -48,7 +47,7 @@ export default function DashboardPage() {
   const { data: inverters = [], dataUpdatedAt } = useLiveInverters();
   const [liveSeries, setLiveSeries] = useState([]);
   const [seeded, setSeeded] = useState(false);
-  const [range, setRange] = useState("live");
+  const [range, setRange] = useState("1h");
 
   // Pre-seed the Live chart with the last 5 minutes of real history so the
   // chart appears populated immediately instead of waiting for 30 polls.
@@ -220,13 +219,14 @@ export default function DashboardPage() {
     if (range === "live") return [];
 
     if (range === "1h") {
-      // Bucket raw telemetry into 10-minute groups. For each bucket we
-      // average power_out per inverter, then sum across the fleet.
-      const TEN_MIN_MS = 10 * 60 * 1000;
+      // Bucket raw telemetry into 5-minute groups keyed off the reading
+      // timestamp — 60 min / 5 = 12 bars. For each bucket we average
+      // power_out per inverter, then sum across the fleet.
+      const FIVE_MIN_MS = 5 * 60 * 1000;
       const buckets = new Map();
       (oneHourData || []).forEach((r) => {
         const t = new Date(r.timestamp).getTime();
-        const bucketStart = Math.floor(t / TEN_MIN_MS) * TEN_MIN_MS;
+        const bucketStart = Math.floor(t / FIVE_MIN_MS) * FIVE_MIN_MS;
         if (!buckets.has(bucketStart)) {
           buckets.set(bucketStart, { t: bucketStart, perInverter: new Map() });
         }
@@ -335,8 +335,8 @@ export default function DashboardPage() {
                   {range === "live" ? "Live Generation" : "Historical Generation"}
                 </h2>
                 <p className="text-xs text-slate-500">
-                  {range === "live"
-                    ? `Aggregate AC power (W) · ${onlineCount} of ${totalInverters} inverters online`
+                  {range === "1h"
+                    ? `Aggregate AC power (W) · 5-min intervals · last hour (12 bars)`
                     : range === "24h"
                     ? `Energy generated per hour (kWh) · last 24 hours`
                     : `Energy generated per day (kWh) · last ${range === "7d" ? "7" : "30"} days`}
@@ -513,7 +513,7 @@ export default function DashboardPage() {
                           : [`${Number(v).toFixed(3)} kWh`, "Energy"]
                       }
                       labelFormatter={(l) =>
-                        range === "1h" ? `10-min bucket: ${l}` :
+                        range === "1h" ? `5-min bucket: ${l}` :
                         range === "24h" ? `Hour: ${l}` : `Day: ${l}`
                       }
                       contentStyle={{ fontSize: 12, borderRadius: 8 }}

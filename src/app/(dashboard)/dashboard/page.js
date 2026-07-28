@@ -382,7 +382,7 @@ export default function DashboardPage() {
 
             {/* Summary strip — totals for the selected range */}
             {range !== "live" && historicalChart.length > 0 && (
-              <div className="grid grid-cols-3 gap-3 mb-4">
+              <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                   <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Energy</p>
                   <p className="text-lg font-black text-blue-600">
@@ -393,15 +393,6 @@ export default function DashboardPage() {
                   <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Peak Power</p>
                   <p className="text-lg font-black text-orange-600">
                     {(rangePeakPower / 1000).toFixed(2)} <span className="text-xs font-medium text-slate-400">kW</span>
-                  </p>
-                </div>
-                <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
-                  <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Buckets</p>
-                  <p className="text-lg font-black text-slate-700">
-                    {historicalChart.length}{" "}
-                    <span className="text-xs font-medium text-slate-400">
-                      {range === "24h" ? "hours" : "days"}
-                    </span>
                   </p>
                 </div>
               </div>

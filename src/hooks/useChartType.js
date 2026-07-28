@@ -6,13 +6,13 @@ import { useCallback, useEffect, useState } from "react";
 // read by every chart. Persisted in localStorage and synced across tabs and
 // components via a custom event + the native storage event.
 const KEY = "ornate.chartType";
-const DEFAULT = "bar";
+const DEFAULT = "line";
 const EVENT = "ornate-charttype-change";
 
 function readStored() {
   try {
     const v = localStorage.getItem(KEY);
-    return v === "line" ? "line" : "bar";
+    return v === "bar" ? "bar" : "line";
   } catch {
     return DEFAULT;
   }

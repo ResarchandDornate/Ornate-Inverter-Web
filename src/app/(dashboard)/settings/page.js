@@ -62,7 +62,7 @@ export default function SettingsPage() {
                     <p className="text-sm font-semibold text-slate-800">Default graph view</p>
                     <p className="text-xs text-slate-500 mt-0.5">
                       Choose how generation charts are drawn across the dashboard, analytics
-                      and inverter pages. Default is Bar.
+                      and inverter pages. Default is Line.
                     </p>
                   </div>
                   <ChartTypeToggle value={chartType} onChange={setChartType} />

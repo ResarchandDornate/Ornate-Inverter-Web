@@ -108,7 +108,11 @@ export default function DashboardPage() {
     i.status === "online" || i.status === "idle" || i.is_online === true;
 
   const totalInverters = inverters.length;
-  const onlineCount = inverters.filter((i) => i.is_online === true || i.status === "online").length;
+  // Count "online" the SAME way the per-inverter status badge does
+  // (computeStatus === "online"), i.e. reporting recently AND grid-connected.
+  // Using is_online alone counts inverters that are reporting but
+  // grid-disconnected / producing ~0 W, which disagrees with the badge.
+  const onlineCount = inverters.filter((i) => computeStatus(i) === "online").length;
   const totalPower = inverters.reduce(
     (s, i) => (isReporting(i) ? s + Number(i.power_out ?? 0) : s),
     0

@@ -6,6 +6,8 @@ import { format } from "date-fns";
 import {
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -17,6 +19,7 @@ import { getData } from "@/lib/api";
 import Topbar from "@/components/Topbar";
 import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
+import ChartTypeToggle from "@/components/ChartTypeToggle";
 import { useLiveInverters } from "@/hooks/useLiveInverters";
 import { computeStatus, formatLastSeen } from "@/lib/inverterStatus";
 
@@ -26,6 +29,7 @@ export default function AnalyticsPage() {
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
   const [date, setDate] = useState(todayStr);
   const isToday = date === todayStr;
+  const [chartType, setChartType] = useState("bar"); // "bar" | "line"
 
   const { data: inverters = [], dataUpdatedAt } = useLiveInverters();
 
@@ -193,9 +197,12 @@ export default function AnalyticsPage() {
                   Total fleet power (W) · updates every 15 s · last {liveSeries.length} samples
                 </p>
               </div>
-              <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-green-50 border border-green-100">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
-                <span className="text-[10px] font-bold text-green-700 uppercase tracking-widest">Live</span>
+              <div className="flex items-center gap-2">
+                <ChartTypeToggle value={chartType} onChange={setChartType} />
+                <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-green-50 border border-green-100">
+                  <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+                  <span className="text-[10px] font-bold text-green-700 uppercase tracking-widest">Live</span>
+                </div>
               </div>
             </div>
             <div style={{ width: "100%", height: 280 }}>
@@ -203,6 +210,28 @@ export default function AnalyticsPage() {
                 <div className="flex items-center justify-center h-full text-sm text-slate-400">
                   Waiting for first sample…
                 </div>
+              ) : chartType === "line" ? (
+                <ResponsiveContainer>
+                  <LineChart data={liveSeries} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                    <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={30} />
+                    <YAxis tick={{ fontSize: 10, fill: "#6B7280" }} unit=" W" domain={[0, "auto"]} width={65} />
+                    <Tooltip
+                      formatter={(v) => [`${Number(v).toFixed(0)} W`, "Total Power"]}
+                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="power"
+                      name="Power (W)"
+                      stroke="#5B6BB5"
+                      strokeWidth={2}
+                      dot={{ r: 2, fill: "#5B6BB5", strokeWidth: 0 }}
+                      activeDot={{ r: 5 }}
+                      isAnimationActive={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
               ) : (
                 <ResponsiveContainer>
                   <BarChart data={liveSeries} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
@@ -245,9 +274,12 @@ export default function AnalyticsPage() {
                 kWh generated per hour · aggregate of all inverters
               </p>
             </div>
-            <span className="text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
-              {hourlyChart.length} hour{hourlyChart.length === 1 ? "" : "s"} of data
-            </span>
+            <div className="flex items-center gap-2">
+              <ChartTypeToggle value={chartType} onChange={setChartType} />
+              <span className="text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
+                {hourlyChart.length} hour{hourlyChart.length === 1 ? "" : "s"} of data
+              </span>
+            </div>
           </div>
           {loadingEnergy ? (
             <div className="h-72 flex items-center justify-center text-sm text-slate-400">
@@ -259,21 +291,48 @@ export default function AnalyticsPage() {
             </div>
           ) : (
             <div style={{ width: "100%", height: 300 }}>
-              <ResponsiveContainer>
-                <BarChart data={hourlyChart} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                  <XAxis dataKey="hour" tick={{ fontSize: 11, fill: "#6B7280" }} />
-                  <YAxis tick={{ fontSize: 11, fill: "#6B7280" }} unit=" kWh" width={70} />
-                  <Tooltip
-                    formatter={(v, name) => {
-                      if (name === "energy") return [`${Number(v).toFixed(3)} kWh`, "Energy"];
-                      return [`${Number(v).toFixed(0)} W`, "Avg Power"];
-                    }}
-                    contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                  />
-                  <Bar dataKey="energy" fill="#E97451" radius={[4, 4, 0, 0]} maxBarSize={42} />
-                </BarChart>
-              </ResponsiveContainer>
+              {chartType === "line" ? (
+                <ResponsiveContainer>
+                  <LineChart data={hourlyChart} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                    <XAxis dataKey="hour" tick={{ fontSize: 11, fill: "#6B7280" }} />
+                    <YAxis tick={{ fontSize: 11, fill: "#6B7280" }} unit=" kWh" width={70} />
+                    <Tooltip
+                      formatter={(v, name) => {
+                        if (name === "energy") return [`${Number(v).toFixed(3)} kWh`, "Energy"];
+                        return [`${Number(v).toFixed(0)} W`, "Avg Power"];
+                      }}
+                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="energy"
+                      name="energy"
+                      stroke="#5B6BB5"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: "#5B6BB5", strokeWidth: 0 }}
+                      activeDot={{ r: 5 }}
+                      isAnimationActive={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <ResponsiveContainer>
+                  <BarChart data={hourlyChart} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                    <XAxis dataKey="hour" tick={{ fontSize: 11, fill: "#6B7280" }} />
+                    <YAxis tick={{ fontSize: 11, fill: "#6B7280" }} unit=" kWh" width={70} />
+                    <Tooltip
+                      formatter={(v, name) => {
+                        if (name === "energy") return [`${Number(v).toFixed(3)} kWh`, "Energy"];
+                        return [`${Number(v).toFixed(0)} W`, "Avg Power"];
+                      }}
+                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                    />
+                    <Bar dataKey="energy" fill="#E97451" radius={[4, 4, 0, 0]} maxBarSize={42} />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
             </div>
           )}
         </section>

@@ -36,6 +36,7 @@ import {
   formatFaultBitmask,
 } from "@/lib/inverterStatus";
 import WeatherWidget from "@/components/WeatherWidget";
+import ChartTypeToggle from "@/components/ChartTypeToggle";
 
 const MAX_LIVE_SAMPLES = 30; // ~5 min @ 10s polling
 
@@ -361,24 +362,7 @@ export default function DashboardPage() {
               </div>
               <div className="flex items-center gap-2 flex-wrap">
                 {/* Bar / Line view toggle */}
-                <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-                  {[
-                    { id: "bar", label: "Bar" },
-                    { id: "line", label: "Line" },
-                  ].map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => setChartType(t.id)}
-                      className={`text-xs px-3 py-1.5 rounded-md font-semibold whitespace-nowrap ${
-                        chartType === t.id
-                          ? "bg-white text-slate-900 shadow-sm"
-                          : "text-slate-500 hover:text-slate-700"
-                      }`}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
+                <ChartTypeToggle value={chartType} onChange={setChartType} />
                 {/* Time-range tabs */}
                 <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
                   {RANGES.map((r) => (

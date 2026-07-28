@@ -7,6 +7,8 @@ import { format } from "date-fns";
 import {
   BarChart,
   Bar,
+  LineChart,
+  Line,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -38,6 +40,7 @@ import {
   parseFaultBitmask,
   hasActiveFault,
 } from "@/lib/inverterStatus";
+import ChartTypeToggle from "@/components/ChartTypeToggle";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -123,6 +126,7 @@ export default function InverterDetailsPage() {
   const { id: inverterId } = useParams();
   const [tab, setTab] = useState("overview");
   const [chartRange, setChartRange] = useState("10m");
+  const [chartType, setChartType] = useState("bar"); // "bar" | "line"
   const [customDate, setCustomDate] = useState(() =>
     new Date().toISOString().split("T")[0]
   );
@@ -634,20 +638,23 @@ export default function InverterDetailsPage() {
                         />
                       )}
                     </div>
-                    <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
-                      {CHART_RANGES.map((r) => (
-                        <button
-                          key={r.id}
-                          onClick={() => setChartRange(r.id)}
-                          className={`text-xs px-3 py-1.5 rounded-md font-semibold whitespace-nowrap ${
-                            chartRange === r.id
-                              ? "bg-white text-slate-900 shadow-sm"
-                              : "text-slate-500 hover:text-slate-700"
-                          }`}
-                        >
-                          {r.label}
-                        </button>
-                      ))}
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <ChartTypeToggle value={chartType} onChange={setChartType} />
+                      <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
+                        {CHART_RANGES.map((r) => (
+                          <button
+                            key={r.id}
+                            onClick={() => setChartRange(r.id)}
+                            className={`text-xs px-3 py-1.5 rounded-md font-semibold whitespace-nowrap ${
+                              chartRange === r.id
+                                ? "bg-white text-slate-900 shadow-sm"
+                                : "text-slate-500 hover:text-slate-700"
+                            }`}
+                          >
+                            {r.label}
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
 
@@ -688,73 +695,147 @@ export default function InverterDetailsPage() {
                       {/* Scrollable plot area — Y-axis is rendered invisibly so
                           the data chart's left margin matches the sticky Y-axis. */}
                       <div className="overflow-x-auto scrollbar-thin" style={{ height: 420 }}>
-                        <BarChart
-                          width={scrollWidth}
-                          height={420}
-                          data={chartData}
-                          margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
-                        >
-                          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                          <XAxis
-                            dataKey="time"
-                            tick={{ fontSize: 10, fill: "#6B7280" }}
-                            interval={Math.max(0, Math.floor(chartData.length / 30))}
-                          />
-                          <YAxis
-                            domain={[0, "auto"]}
-                            tick={false}
-                            axisLine={false}
-                            width={70}
-                          />
-                          <Tooltip
-                            formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
-                            labelFormatter={(_, payload) => {
-                              const t = payload?.[0]?.payload?.t;
-                              if (!t) return "";
-                              if (currentRange.bucketKind === "day")
-                                return format(new Date(t), "EEE, dd MMM yyyy");
-                              if (currentRange.bucketKind === "hour")
-                                return format(new Date(t), "EEE, dd MMM HH:mm");
-                              return format(new Date(t), "EEE, dd MMM HH:mm:ss");
-                            }}
-                            contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                          />
-                          <Bar
-                            dataKey="power"
-                            fill="#E97451"
-                            radius={[3, 3, 0, 0]}
-                            maxBarSize={20}
-                          />
-                        </BarChart>
+                        {chartType === "line" ? (
+                          <LineChart
+                            width={scrollWidth}
+                            height={420}
+                            data={chartData}
+                            margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                            <XAxis
+                              dataKey="time"
+                              tick={{ fontSize: 10, fill: "#6B7280" }}
+                              interval={Math.max(0, Math.floor(chartData.length / 30))}
+                            />
+                            <YAxis
+                              domain={[0, "auto"]}
+                              tick={false}
+                              axisLine={false}
+                              width={70}
+                            />
+                            <Tooltip
+                              formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
+                              labelFormatter={(_, payload) => {
+                                const t = payload?.[0]?.payload?.t;
+                                if (!t) return "";
+                                if (currentRange.bucketKind === "day")
+                                  return format(new Date(t), "EEE, dd MMM yyyy");
+                                if (currentRange.bucketKind === "hour")
+                                  return format(new Date(t), "EEE, dd MMM HH:mm");
+                                return format(new Date(t), "EEE, dd MMM HH:mm:ss");
+                              }}
+                              contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="power"
+                              stroke="#5B6BB5"
+                              strokeWidth={2}
+                              dot={{ r: 2, fill: "#5B6BB5", strokeWidth: 0 }}
+                              activeDot={{ r: 5 }}
+                              isAnimationActive={false}
+                            />
+                          </LineChart>
+                        ) : (
+                          <BarChart
+                            width={scrollWidth}
+                            height={420}
+                            data={chartData}
+                            margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                            <XAxis
+                              dataKey="time"
+                              tick={{ fontSize: 10, fill: "#6B7280" }}
+                              interval={Math.max(0, Math.floor(chartData.length / 30))}
+                            />
+                            <YAxis
+                              domain={[0, "auto"]}
+                              tick={false}
+                              axisLine={false}
+                              width={70}
+                            />
+                            <Tooltip
+                              formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
+                              labelFormatter={(_, payload) => {
+                                const t = payload?.[0]?.payload?.t;
+                                if (!t) return "";
+                                if (currentRange.bucketKind === "day")
+                                  return format(new Date(t), "EEE, dd MMM yyyy");
+                                if (currentRange.bucketKind === "hour")
+                                  return format(new Date(t), "EEE, dd MMM HH:mm");
+                                return format(new Date(t), "EEE, dd MMM HH:mm:ss");
+                              }}
+                              contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                            />
+                            <Bar
+                              dataKey="power"
+                              fill="#E97451"
+                              radius={[3, 3, 0, 0]}
+                              maxBarSize={20}
+                            />
+                          </BarChart>
+                        )}
                       </div>
                     </div>
                   ) : (
                     <div style={{ width: "100%", height: 420 }}>
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                          <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={20} />
-                          <YAxis domain={[0, "auto"]} tick={{ fontSize: 10, fill: "#6B7280" }} unit={yUnit} width={70} />
-                          <Tooltip
-                            formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
-                            labelFormatter={(_, payload) => {
-                              const t = payload?.[0]?.payload?.t;
-                              if (!t) return "";
-                              if (currentRange.bucketKind === "day")
-                                return format(new Date(t), "EEE, dd MMM yyyy");
-                              if (currentRange.bucketKind === "hour")
-                                return format(new Date(t), "EEE, dd MMM HH:mm");
-                              return format(new Date(t), "EEE, dd MMM HH:mm:ss");
-                            }}
-                            contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                          />
-                          <Bar
-                            dataKey="power"
-                            fill="#E97451"
-                            radius={[4, 4, 0, 0]}
-                            maxBarSize={28}
-                          />
-                        </BarChart>
+                        {chartType === "line" ? (
+                          <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                            <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={20} />
+                            <YAxis domain={[0, "auto"]} tick={{ fontSize: 10, fill: "#6B7280" }} unit={yUnit} width={70} />
+                            <Tooltip
+                              formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
+                              labelFormatter={(_, payload) => {
+                                const t = payload?.[0]?.payload?.t;
+                                if (!t) return "";
+                                if (currentRange.bucketKind === "day")
+                                  return format(new Date(t), "EEE, dd MMM yyyy");
+                                if (currentRange.bucketKind === "hour")
+                                  return format(new Date(t), "EEE, dd MMM HH:mm");
+                                return format(new Date(t), "EEE, dd MMM HH:mm:ss");
+                              }}
+                              contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                            />
+                            <Line
+                              type="monotone"
+                              dataKey="power"
+                              stroke="#5B6BB5"
+                              strokeWidth={2}
+                              dot={{ r: 2, fill: "#5B6BB5", strokeWidth: 0 }}
+                              activeDot={{ r: 5 }}
+                              isAnimationActive={false}
+                            />
+                          </LineChart>
+                        ) : (
+                          <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                            <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={20} />
+                            <YAxis domain={[0, "auto"]} tick={{ fontSize: 10, fill: "#6B7280" }} unit={yUnit} width={70} />
+                            <Tooltip
+                              formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
+                              labelFormatter={(_, payload) => {
+                                const t = payload?.[0]?.payload?.t;
+                                if (!t) return "";
+                                if (currentRange.bucketKind === "day")
+                                  return format(new Date(t), "EEE, dd MMM yyyy");
+                                if (currentRange.bucketKind === "hour")
+                                  return format(new Date(t), "EEE, dd MMM HH:mm");
+                                return format(new Date(t), "EEE, dd MMM HH:mm:ss");
+                              }}
+                              contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                            />
+                            <Bar
+                              dataKey="power"
+                              fill="#E97451"
+                              radius={[4, 4, 0, 0]}
+                              maxBarSize={28}
+                            />
+                          </BarChart>
+                        )}
                       </ResponsiveContainer>
                     </div>
                   )}

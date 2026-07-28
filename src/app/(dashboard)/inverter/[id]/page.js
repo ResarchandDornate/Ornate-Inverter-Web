@@ -75,6 +75,7 @@ function exportReadingsToCsv(records, inverterId) {
     "Grid Connected",
     "Fault Bitmask",
     "HW Fault",
+    "Source",
   ];
 
   const rows = records.map((r) => [
@@ -90,6 +91,7 @@ function exportReadingsToCsv(records, inverterId) {
     r.grid_connected ? "Yes" : "No",
     r.fault_bitmask ?? 0,
     r.hw_fault ? "Yes" : "No",
+    r.queued_offline ? "Backlog" : "Live",
   ]);
 
   const escape = (cell) => {
@@ -772,6 +774,7 @@ export default function InverterDetailsPage() {
                           <th className="text-center px-5 py-3 font-semibold">Current (A)</th>
                           <th className="text-center px-5 py-3 font-semibold">Power Out (W)</th>
                           <th className="text-center px-5 py-3 font-semibold">Temp (°C)</th>
+                          <th className="text-center px-5 py-3 font-semibold">Source</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -787,6 +790,11 @@ export default function InverterDetailsPage() {
                             <td className="px-5 py-2.5 text-center text-slate-700">{parseFloat(item.current).toFixed(2)}</td>
                             <td className="px-5 py-2.5 text-center font-semibold text-orange-600">{parseFloat(item.power_out).toFixed(0)}</td>
                             <td className="px-5 py-2.5 text-center text-slate-700">{item.temperature ?? "—"}</td>
+                            <td className="px-5 py-2.5 text-center">
+                              {item.queued_offline
+                                ? <span className="inline-block rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700" title="Published from the device's offline backlog — timestamp is the real reading time">Backlog</span>
+                                : <span className="text-[10px] text-slate-400">Live</span>}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

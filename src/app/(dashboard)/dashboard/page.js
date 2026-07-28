@@ -505,6 +505,7 @@ export default function DashboardPage() {
                         />
                         <Line
                           type="monotone"
+                          connectNulls
                           dataKey="energy"
                           name="energy"
                           stroke="#5B6BB5"
@@ -595,6 +596,7 @@ export default function DashboardPage() {
                     />
                     <Line
                       type="monotone"
+                      connectNulls
                       dataKey={chartValueKey}
                       name={chartValueKey}
                       stroke="#5B6BB5"

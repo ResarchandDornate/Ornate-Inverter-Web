@@ -729,6 +729,7 @@ export default function InverterDetailsPage() {
                             />
                             <Line
                               type="monotone"
+                              connectNulls
                               dataKey="power"
                               stroke="#5B6BB5"
                               strokeWidth={2}
@@ -802,6 +803,7 @@ export default function InverterDetailsPage() {
                             />
                             <Line
                               type="monotone"
+                              connectNulls
                               dataKey="power"
                               stroke="#5B6BB5"
                               strokeWidth={2}

@@ -19,7 +19,7 @@ import { getData } from "@/lib/api";
 import Topbar from "@/components/Topbar";
 import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
-import ChartTypeToggle from "@/components/ChartTypeToggle";
+import { useChartType } from "@/hooks/useChartType";
 import { useLiveInverters } from "@/hooks/useLiveInverters";
 import { computeStatus, formatLastSeen } from "@/lib/inverterStatus";
 
@@ -29,7 +29,7 @@ export default function AnalyticsPage() {
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
   const [date, setDate] = useState(todayStr);
   const isToday = date === todayStr;
-  const [chartType, setChartType] = useState("bar"); // "bar" | "line"
+  const [chartType] = useChartType(); // global "bar" | "line" from Settings
 
   const { data: inverters = [], dataUpdatedAt } = useLiveInverters();
 
@@ -198,7 +198,6 @@ export default function AnalyticsPage() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <ChartTypeToggle value={chartType} onChange={setChartType} />
                 <div className="flex items-center gap-2 px-2.5 py-1 rounded-full bg-green-50 border border-green-100">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                   <span className="text-[10px] font-bold text-green-700 uppercase tracking-widest">Live</span>
@@ -275,12 +274,9 @@ export default function AnalyticsPage() {
                 kWh generated per hour · aggregate of all inverters
               </p>
             </div>
-            <div className="flex items-center gap-2">
-              <ChartTypeToggle value={chartType} onChange={setChartType} />
-              <span className="text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
-                {hourlyChart.length} hour{hourlyChart.length === 1 ? "" : "s"} of data
-              </span>
-            </div>
+            <span className="text-xs text-slate-400 bg-slate-50 px-2 py-1 rounded-md border border-slate-100">
+              {hourlyChart.length} hour{hourlyChart.length === 1 ? "" : "s"} of data
+            </span>
           </div>
           {loadingEnergy ? (
             <div className="h-72 flex items-center justify-center text-sm text-slate-400">

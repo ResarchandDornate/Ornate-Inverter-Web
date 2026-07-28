@@ -40,7 +40,7 @@ import {
   parseFaultBitmask,
   hasActiveFault,
 } from "@/lib/inverterStatus";
-import ChartTypeToggle from "@/components/ChartTypeToggle";
+import { useChartType } from "@/hooks/useChartType";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -126,7 +126,7 @@ export default function InverterDetailsPage() {
   const { id: inverterId } = useParams();
   const [tab, setTab] = useState("overview");
   const [chartRange, setChartRange] = useState("10m");
-  const [chartType, setChartType] = useState("bar"); // "bar" | "line"
+  const [chartType] = useChartType(); // global "bar" | "line" from Settings
   const [customDate, setCustomDate] = useState(() =>
     new Date().toISOString().split("T")[0]
   );
@@ -638,23 +638,20 @@ export default function InverterDetailsPage() {
                         />
                       )}
                     </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <ChartTypeToggle value={chartType} onChange={setChartType} />
-                      <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
-                        {CHART_RANGES.map((r) => (
-                          <button
-                            key={r.id}
-                            onClick={() => setChartRange(r.id)}
-                            className={`text-xs px-3 py-1.5 rounded-md font-semibold whitespace-nowrap ${
-                              chartRange === r.id
-                                ? "bg-white text-slate-900 shadow-sm"
-                                : "text-slate-500 hover:text-slate-700"
-                            }`}
-                          >
-                            {r.label}
-                          </button>
-                        ))}
-                      </div>
+                    <div className="flex gap-1 bg-slate-100 rounded-lg p-1 flex-wrap">
+                      {CHART_RANGES.map((r) => (
+                        <button
+                          key={r.id}
+                          onClick={() => setChartRange(r.id)}
+                          className={`text-xs px-3 py-1.5 rounded-md font-semibold whitespace-nowrap ${
+                            chartRange === r.id
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-500 hover:text-slate-700"
+                          }`}
+                        >
+                          {r.label}
+                        </button>
+                      ))}
                     </div>
                   </div>
 

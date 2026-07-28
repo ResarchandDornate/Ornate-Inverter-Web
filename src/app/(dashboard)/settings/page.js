@@ -1,17 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { Settings as SettingsIcon, User, Bell, Shield } from "lucide-react";
+import { Settings as SettingsIcon, User, Bell, Shield, BarChart3 } from "lucide-react";
 import Topbar from "@/components/Topbar";
+import ChartTypeToggle from "@/components/ChartTypeToggle";
+import { useChartType } from "@/hooks/useChartType";
 
 const SECTIONS = [
+  { id: "display", label: "Display", icon: BarChart3 },
   { id: "profile", label: "Profile", icon: User },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "security", label: "Security", icon: Shield },
 ];
 
 export default function SettingsPage() {
-  const [section, setSection] = useState("profile");
+  const [section, setSection] = useState("display");
+  const [chartType, setChartType] = useChartType();
 
   return (
     <>
@@ -51,7 +55,22 @@ export default function SettingsPage() {
                 <p className="text-xs text-slate-500">Configuration options for this section.</p>
               </div>
             </div>
-            <p className="text-sm text-slate-500">Settings UI placeholder. Wire up to backend endpoints when ready.</p>
+            {section === "display" ? (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between gap-4 flex-wrap border border-slate-100 rounded-lg p-4 bg-slate-50/60">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-800">Default graph view</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Choose how generation charts are drawn across the dashboard, analytics
+                      and inverter pages. Default is Bar.
+                    </p>
+                  </div>
+                  <ChartTypeToggle value={chartType} onChange={setChartType} />
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-slate-500">Settings UI placeholder. Wire up to backend endpoints when ready.</p>
+            )}
           </section>
         </div>
       </main>

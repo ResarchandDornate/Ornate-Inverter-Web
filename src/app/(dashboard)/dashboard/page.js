@@ -36,7 +36,7 @@ import {
   formatFaultBitmask,
 } from "@/lib/inverterStatus";
 import WeatherWidget from "@/components/WeatherWidget";
-import ChartTypeToggle from "@/components/ChartTypeToggle";
+import { useChartType } from "@/hooks/useChartType";
 
 const MAX_LIVE_SAMPLES = 30; // ~5 min @ 10s polling
 
@@ -52,7 +52,7 @@ export default function DashboardPage() {
   const [liveSeries, setLiveSeries] = useState([]);
   const [seeded, setSeeded] = useState(false);
   const [range, setRange] = useState("1h");
-  const [chartType, setChartType] = useState("bar"); // "bar" | "line"
+  const [chartType] = useChartType(); // global "bar" | "line" from Settings
 
   // Pre-seed the Live chart with the last 5 minutes of real history so the
   // chart appears populated immediately instead of waiting for 30 polls.
@@ -361,8 +361,6 @@ export default function DashboardPage() {
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
-                {/* Bar / Line view toggle */}
-                <ChartTypeToggle value={chartType} onChange={setChartType} />
                 {/* Time-range tabs */}
                 <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
                   {RANGES.map((r) => (

@@ -537,7 +537,6 @@ export default function DashboardPage() {
                             fill="#DC2626"
                             stroke="#fff"
                             strokeWidth={1.5}
-                            label={{ value: "↑ highest", position: "top", fontSize: 11, fill: "#DC2626", fontWeight: 700 }}
                           />
                         )}
                         {loPoint && loPoint !== hiPoint && (
@@ -548,7 +547,6 @@ export default function DashboardPage() {
                             fill="#0F766E"
                             stroke="#fff"
                             strokeWidth={1.5}
-                            label={{ value: "↓ lowest", position: "bottom", fontSize: 11, fill: "#0F766E", fontWeight: 700 }}
                           />
                         )}
                       </LineChart>
@@ -629,7 +627,6 @@ export default function DashboardPage() {
                         fill="#DC2626"
                         stroke="#fff"
                         strokeWidth={1.5}
-                        label={{ value: "↑ highest", position: "top", fontSize: 11, fill: "#DC2626", fontWeight: 700 }}
                       />
                     )}
                     {loPoint && loPoint !== hiPoint && (
@@ -640,7 +637,6 @@ export default function DashboardPage() {
                         fill="#0F766E"
                         stroke="#fff"
                         strokeWidth={1.5}
-                        label={{ value: "↓ lowest", position: "bottom", fontSize: 11, fill: "#0F766E", fontWeight: 700 }}
                       />
                     )}
                   </LineChart>

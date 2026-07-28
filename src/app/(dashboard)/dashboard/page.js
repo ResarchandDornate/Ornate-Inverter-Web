@@ -19,6 +19,9 @@ import {
   BarChart,
   Bar,
   Cell,
+  LineChart,
+  Line,
+  ReferenceDot,
 } from "recharts";
 import { getData } from "@/lib/api";
 import Topbar from "@/components/Topbar";
@@ -48,6 +51,7 @@ export default function DashboardPage() {
   const [liveSeries, setLiveSeries] = useState([]);
   const [seeded, setSeeded] = useState(false);
   const [range, setRange] = useState("1h");
+  const [chartType, setChartType] = useState("bar"); // "bar" | "line"
 
   // Pre-seed the Live chart with the last 5 minutes of real history so the
   // chart appears populated immediately instead of waiting for 30 polls.
@@ -283,6 +287,19 @@ export default function DashboardPage() {
   const rangeTotalEnergy = historicalChart.reduce((s, b) => s + (b.energy || 0), 0);
   const rangePeakPower = historicalChart.reduce((m, b) => Math.max(m, b.avgPower || 0), 0);
   const isPowerView = range === "1h"; // 1h uses power bars (W), others use energy bars (kWh)
+  const chartValueKey = isPowerView ? "avgPower" : "energy";
+
+  // Highest / lowest data points — annotated on the line view.
+  const { hiPoint, loPoint } = useMemo(() => {
+    if (!historicalChart.length) return { hiPoint: null, loPoint: null };
+    let hi = historicalChart[0];
+    let lo = historicalChart[0];
+    for (const d of historicalChart) {
+      if ((d[chartValueKey] || 0) > (hi[chartValueKey] || 0)) hi = d;
+      if ((d[chartValueKey] || 0) < (lo[chartValueKey] || 0)) lo = d;
+    }
+    return { hiPoint: hi, loPoint: lo };
+  }, [historicalChart, chartValueKey]);
 
   return (
     <>
@@ -342,20 +359,42 @@ export default function DashboardPage() {
                     : `Energy generated per day (kWh) · last ${range === "7d" ? "7" : "30"} days`}
                 </p>
               </div>
-              <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-                {RANGES.map((r) => (
-                  <button
-                    key={r.id}
-                    onClick={() => setRange(r.id)}
-                    className={`text-xs px-3 py-1.5 rounded-md font-semibold whitespace-nowrap ${
-                      range === r.id
-                        ? "bg-white text-slate-900 shadow-sm"
-                        : "text-slate-500 hover:text-slate-700"
-                    }`}
-                  >
-                    {r.label}
-                  </button>
-                ))}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Bar / Line view toggle */}
+                <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+                  {[
+                    { id: "bar", label: "Bar" },
+                    { id: "line", label: "Line" },
+                  ].map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setChartType(t.id)}
+                      className={`text-xs px-3 py-1.5 rounded-md font-semibold whitespace-nowrap ${
+                        chartType === t.id
+                          ? "bg-white text-slate-900 shadow-sm"
+                          : "text-slate-500 hover:text-slate-700"
+                      }`}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+                {/* Time-range tabs */}
+                <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
+                  {RANGES.map((r) => (
+                    <button
+                      key={r.id}
+                      onClick={() => setRange(r.id)}
+                      className={`text-xs px-3 py-1.5 rounded-md font-semibold whitespace-nowrap ${
+                        range === r.id
+                          ? "bg-white text-slate-900 shadow-sm"
+                          : "text-slate-500 hover:text-slate-700"
+                      }`}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 
@@ -462,31 +501,150 @@ export default function DashboardPage() {
                   </div>
                   {/* Scrollable plot — Y-axis hidden but space reserved */}
                   <div className="overflow-x-auto scrollbar-thin" style={{ height: 480 }}>
-                    <BarChart
-                      width={Math.max(800, historicalChart.length * 14)}
-                      height={480}
-                      data={historicalChart}
-                      margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                      <XAxis
-                        dataKey="label"
-                        tick={{ fontSize: 10, fill: "#6B7280" }}
-                        interval={Math.max(0, Math.floor(historicalChart.length / 30))}
-                      />
-                      <YAxis domain={[0, "auto"]} tick={false} axisLine={false} width={70} />
-                      <Tooltip
-                        formatter={(v) => [`${Number(v).toFixed(3)} kWh`, "Energy"]}
-                        contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                      />
-                      <Bar dataKey="energy" name="energy" radius={[3, 3, 0, 0]} maxBarSize={14}>
-                        {historicalChart.map((_, i) => (
-                          <Cell key={i} fill="#E97451" opacity={0.6 + (i / historicalChart.length) * 0.4} />
-                        ))}
-                      </Bar>
-                    </BarChart>
+                    {chartType === "line" ? (
+                      <LineChart
+                        width={Math.max(800, historicalChart.length * 14)}
+                        height={480}
+                        data={historicalChart}
+                        margin={{ top: 24, right: 20, left: 0, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                        <XAxis
+                          dataKey="label"
+                          tick={{ fontSize: 10, fill: "#6B7280" }}
+                          interval={Math.max(0, Math.floor(historicalChart.length / 30))}
+                        />
+                        <YAxis domain={[0, "auto"]} tick={false} axisLine={false} width={70} />
+                        <Tooltip
+                          formatter={(v) => [`${Number(v).toFixed(3)} kWh`, "Energy"]}
+                          contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="energy"
+                          name="energy"
+                          stroke="#5B6BB5"
+                          strokeWidth={2}
+                          dot={{ r: 2, fill: "#5B6BB5", strokeWidth: 0 }}
+                          activeDot={{ r: 5 }}
+                          isAnimationActive={false}
+                        />
+                        {hiPoint && (
+                          <ReferenceDot
+                            x={hiPoint.label}
+                            y={hiPoint.energy || 0}
+                            r={5}
+                            fill="#DC2626"
+                            stroke="#fff"
+                            strokeWidth={1.5}
+                            label={{ value: "↑ highest", position: "top", fontSize: 11, fill: "#DC2626", fontWeight: 700 }}
+                          />
+                        )}
+                        {loPoint && loPoint !== hiPoint && (
+                          <ReferenceDot
+                            x={loPoint.label}
+                            y={loPoint.energy || 0}
+                            r={5}
+                            fill="#0F766E"
+                            stroke="#fff"
+                            strokeWidth={1.5}
+                            label={{ value: "↓ lowest", position: "bottom", fontSize: 11, fill: "#0F766E", fontWeight: 700 }}
+                          />
+                        )}
+                      </LineChart>
+                    ) : (
+                      <BarChart
+                        width={Math.max(800, historicalChart.length * 14)}
+                        height={480}
+                        data={historicalChart}
+                        margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                        <XAxis
+                          dataKey="label"
+                          tick={{ fontSize: 10, fill: "#6B7280" }}
+                          interval={Math.max(0, Math.floor(historicalChart.length / 30))}
+                        />
+                        <YAxis domain={[0, "auto"]} tick={false} axisLine={false} width={70} />
+                        <Tooltip
+                          formatter={(v) => [`${Number(v).toFixed(3)} kWh`, "Energy"]}
+                          contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                        />
+                        <Bar dataKey="energy" name="energy" radius={[3, 3, 0, 0]} maxBarSize={14}>
+                          {historicalChart.map((_, i) => (
+                            <Cell key={i} fill="#E97451" opacity={0.6 + (i / historicalChart.length) * 0.4} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    )}
                   </div>
                 </div>
+              ) : chartType === "line" ? (
+                // Line view — same data, with highest / lowest markers.
+                <ResponsiveContainer>
+                  <LineChart data={historicalChart} margin={{ top: 24, right: 20, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
+                    <XAxis
+                      dataKey="label"
+                      tick={{ fontSize: 10, fill: "#6B7280" }}
+                      interval={range === "30d" ? "preserveStartEnd" : 0}
+                      angle={range === "30d" ? -30 : 0}
+                      textAnchor={range === "30d" ? "end" : "middle"}
+                      height={range === "30d" ? 50 : 30}
+                    />
+                    <YAxis
+                      tick={{ fontSize: 11, fill: "#6B7280" }}
+                      unit={isPowerView ? undefined : " kWh"}
+                      tickFormatter={isPowerView ? (v) => `${(Number(v) / 1000).toFixed(1)} kW` : undefined}
+                      width={70}
+                      domain={[0, "auto"]}
+                    />
+                    <Tooltip
+                      formatter={(v) =>
+                        isPowerView
+                          ? [`${(Number(v) / 1000).toFixed(2)} kW`, "Avg Power"]
+                          : [`${Number(v).toFixed(3)} kWh`, "Energy"]
+                      }
+                      labelFormatter={(l) =>
+                        range === "1h" ? `5-min bucket: ${l}` :
+                        range === "24h" ? `Hour: ${l}` : `Day: ${l}`
+                      }
+                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey={chartValueKey}
+                      name={chartValueKey}
+                      stroke="#5B6BB5"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: "#5B6BB5", strokeWidth: 0 }}
+                      activeDot={{ r: 5 }}
+                      isAnimationActive={false}
+                    />
+                    {hiPoint && (
+                      <ReferenceDot
+                        x={hiPoint.label}
+                        y={hiPoint[chartValueKey] || 0}
+                        r={5}
+                        fill="#DC2626"
+                        stroke="#fff"
+                        strokeWidth={1.5}
+                        label={{ value: "↑ highest", position: "top", fontSize: 11, fill: "#DC2626", fontWeight: 700 }}
+                      />
+                    )}
+                    {loPoint && loPoint !== hiPoint && (
+                      <ReferenceDot
+                        x={loPoint.label}
+                        y={loPoint[chartValueKey] || 0}
+                        r={5}
+                        fill="#0F766E"
+                        stroke="#fff"
+                        strokeWidth={1.5}
+                        label={{ value: "↓ lowest", position: "bottom", fontSize: 11, fill: "#0F766E", fontWeight: 700 }}
+                      />
+                    )}
+                  </LineChart>
+                </ResponsiveContainer>
               ) : (
                 // 1h / 24h / 30d — fits within the card; no scroll needed.
                 <ResponsiveContainer>

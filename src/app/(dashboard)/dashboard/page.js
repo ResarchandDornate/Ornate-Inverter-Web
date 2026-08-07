@@ -32,6 +32,7 @@ import {
   computeStatus,
   hasActiveFault,
   isHwFault,
+  isLive,
   parseFaultBitmask,
   formatFaultBitmask,
 } from "@/lib/inverterStatus";
@@ -108,15 +109,18 @@ export default function DashboardPage() {
   // Offline inverters keep their last cached power_out / temperature values,
   // but those are stale — including them in the fleet aggregates would lie
   // (e.g. KPI shows 1479 W when 0/2 inverters are actually online).
+  // "Recovering" is deliberately NOT reporting for live aggregates: its latest
+  // reading is old backlog, so its cached power/temperature would be stale and
+  // shouldn't pull the fleet KPIs around.
   const isReporting = (i) =>
-    i.status === "online" || i.status === "idle" || i.is_online === true;
+    i.status === "online" || i.status === "live" || i.status === "idle" || i.is_online === true;
 
   const totalInverters = inverters.length;
   // Count "online" the SAME way the per-inverter status badge does
   // (computeStatus === "online"), i.e. reporting recently AND grid-connected.
   // Using is_online alone counts inverters that are reporting but
   // grid-disconnected / producing ~0 W, which disagrees with the badge.
-  const onlineCount = inverters.filter((i) => computeStatus(i) === "online").length;
+  const onlineCount = inverters.filter((i) => isLive(i)).length;
   const totalPower = inverters.reduce(
     (s, i) => (isReporting(i) ? s + Number(i.power_out ?? 0) : s),
     0
@@ -257,7 +261,12 @@ export default function DashboardPage() {
             sortKey: bucket.t,
             label: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
             avgPower: fleetAvgPower,
-            energy: 0, // not relevant for 1h bar — show power as the bar height
+            // Integrate power over this 5-minute bucket to get real energy
+            // (kWh = avgPower(W) × hours ÷ 1000), instead of leaving this at
+            // 0 — the 1h view has no pre-aggregated energy_generated records
+            // like the 24h/7d/30d views, but the raw power samples are
+            // enough to derive it directly.
+            energy: (fleetAvgPower * (FIVE_MIN_MS / 3600000)) / 1000,
           };
         });
     }

@@ -221,22 +221,18 @@ export default function InverterDetailsPage() {
   // Status card without circularity).
   const offlineByConnectivity =
     merged.status === "offline" || merged.is_online === false;
-  // The "Grid Status" card now follows the same offline rule as every other
-  // card: if the inverter isn't reporting, Grid shows OFF too, regardless of
-  // what the last (possibly days-old) reading said — a stale "grid was
-  // connected" reading is misleading once the device itself has gone dark.
-  const readingGridConnected = offlineByConnectivity
-    ? false
-    : (latestReading.grid_connected === undefined ? null : latestReading.grid_connected);
-  // Use the same priority ordering as computeStatus(): trust the explicit
-  // `status` field first (it reflects the backend's "offline after 10+ min
-  // of zero power" rule), then is_online, then grid_connected. This makes
-  // every per-card display flip together — Voltage, Current, Grid Status,
-  // VPV/IPV/Delta all collapse to 0 / N/A / OFF when offline is true.
-  const offline = offlineByConnectivity || gridConnected === false;
+  const status = computeStatus(merged);
+  // Grid Status is coupled to online status: grid on ⇔ inverter live. The
+  // backend only reports "live" when the device's MQTT grid_connected flag is
+  // true, so grid off (or no data) makes status "offline" and the grid reads
+  // OFF. `grid_connected` here is the backend `grid_on` value.
+  const readingGridConnected = gridConnected === true;
+  // "offline" collapses Voltage/Current/Temp/VPV/IPV to 0. Grid-off now implies
+  // offline (they're coupled), so this — driven by status/is_online — already
+  // covers the grid-off case; the whole card set flips together.
+  const offline = offlineByConnectivity;
   const bitmask = parseFaultBitmask(latestReading.fault_bitmask);
   const hasFault = hasActiveFault(latestReading);
-  const status = computeStatus(merged);
 
   const currentRange = CHART_RANGES.find((r) => r.id === chartRange) || CHART_RANGES[0];
 

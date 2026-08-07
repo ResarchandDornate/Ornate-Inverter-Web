@@ -8,7 +8,7 @@ import {
   BarChart3,
   Settings,
   LogOut,
-  Bell,
+  AlertTriangle,
 } from "lucide-react";
 import { clearToken } from "@/lib/auth";
 import { showSuccess } from "@/lib/toast";
@@ -17,7 +17,7 @@ const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/inverters", label: "Inverters", icon: Zap },
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
-  { href: "/alerts", label: "Alerts", icon: Bell },
+  { href: "/faults", label: "Faults", icon: AlertTriangle },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

@@ -9,6 +9,7 @@ import { useLiveInverters } from "@/hooks/useLiveInverters";
 import {
   computeStatus,
   formatLastSeen,
+  isLive,
   parseFaultBitmask,
   hasActiveFault,
   formatFaultBitmask,
@@ -22,7 +23,8 @@ export default function InvertersListPage() {
 
   const filtered = useMemo(() => {
     let arr = inverters;
-    if (filter === "online") arr = arr.filter((i) => computeStatus(i) === "online");
+    if (filter === "live") arr = arr.filter((i) => isLive(i));
+    if (filter === "recovering") arr = arr.filter((i) => computeStatus(i) === "recovering");
     if (filter === "offline") arr = arr.filter((i) => computeStatus(i) === "offline");
     if (filter === "idle") arr = arr.filter((i) => computeStatus(i) === "idle");
     if (filter === "faults") arr = arr.filter((i) => computeStatus(i) === "fault");
@@ -57,7 +59,7 @@ export default function InvertersListPage() {
           </div>
 
           <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-            {["all", "online", "idle", "offline", "faults"].map((f) => (
+            {["all", "live", "recovering", "idle", "offline", "faults"].map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}

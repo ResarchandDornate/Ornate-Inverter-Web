@@ -21,7 +21,7 @@ import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
 import { useChartType } from "@/hooks/useChartType";
 import { useLiveInverters } from "@/hooks/useLiveInverters";
-import { computeStatus, formatLastSeen } from "@/lib/inverterStatus";
+import { computeStatus, formatLastSeen, isLive } from "@/lib/inverterStatus";
 
 export default function AnalyticsPage() {
   // Memoize so it doesn't get recreated on every render (defensive — even
@@ -46,7 +46,7 @@ export default function AnalyticsPage() {
     // Same rule as the KPI cards below: only count inverters that are
     // actually online right now, not whatever their last (possibly stale)
     // reading said.
-    const onlineNow = inverters.filter((i) => computeStatus(i) === "online");
+    const onlineNow = inverters.filter((i) => isLive(i));
     const totalPower = onlineNow.reduce((s, i) => s + Number(i.power_out ?? 0), 0);
     const online = onlineNow.length;
     const point = {
@@ -117,13 +117,13 @@ export default function AnalyticsPage() {
   // and `grid_connected` both come from each inverter's latest reading no
   // matter how stale, so summing/counting them unconditionally overstates
   // "live" power and online count using data that can be days old.
-  const onlineInverters = inverters.filter((i) => computeStatus(i) === "online");
+  const onlineInverters = inverters.filter((i) => isLive(i));
   const totalLivePower = onlineInverters.reduce((s, i) => s + Number(i.power_out ?? 0), 0);
   const onlineCount = onlineInverters.length;
   const avgTemp = useMemo(() => {
     // Same rule as power/online above — an offline inverter's last-known
     // temperature can be months old and shouldn't pull the fleet average.
-    const valid = inverters.filter((i) => computeStatus(i) === "online" && i.temperature != null);
+    const valid = inverters.filter((i) => isLive(i) && i.temperature != null);
     if (!valid.length) return 0;
     return valid.reduce((s, i) => s + Number(i.temperature), 0) / valid.length;
   }, [inverters]);

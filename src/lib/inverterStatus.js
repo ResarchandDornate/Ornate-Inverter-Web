@@ -42,11 +42,29 @@ export function formatFaultBitmask(raw) {
   return "0x" + parseFaultBitmask(raw).toString(16).toUpperCase();
 }
 
+// Statuses that mean "current live data is flowing" — the healthy state.
+// The backend now emits "live"; "online" is kept for backward compatibility
+// with older payloads / cached records.
+export const LIVE_STATUSES = ["live", "online"];
+export function isLive(inv) {
+  return LIVE_STATUSES.includes(computeStatus(inv));
+}
+// The device is connected and actively reporting (either live OR replaying its
+// offline backlog). Used where "is it talking to us right now?" matters.
+export function isReportingStatus(status) {
+  return status === "live" || status === "online" || status === "recovering";
+}
+
 export function computeStatus(inv) {
   if (hasActiveFault(inv)) return "fault";
 
   // Trust the explicit status string first.
   if (inv?.status === "offline") return "offline";
+  // "recovering" — device reconnected and is replaying its offline backlog;
+  // it hasn't caught up to live data yet.
+  if (inv?.status === "recovering") return "recovering";
+  // "live" — current data flowing (the backend's new name for "online").
+  if (inv?.status === "live") return "live";
   if (inv?.status === "idle") return "idle";
   if (inv?.status === "online") return "online";
 

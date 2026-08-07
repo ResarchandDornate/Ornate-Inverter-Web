@@ -8,7 +8,7 @@ export default async function AssetsPage() {
   const [assets, s] = await Promise.all([getAssets(), getFleetStats()]);
 
   return (
-    <div className="mx-auto max-w-[1400px] px-6 py-5">
+    <div className="mx-auto max-w-350 px-4 py-5 sm:px-6">
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
         <FilterSelect label="Select territories" />

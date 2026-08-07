@@ -49,9 +49,9 @@ export function MapView({ assets }) {
   const warning = assets.filter((a) => a.health === 'warning').length;
 
   return (
-    <div className="flex h-[calc(100vh-3.5rem)] flex-col">
+    <div className="flex min-h-[calc(100vh-3.5rem)] flex-col">
       {/* Stat bar */}
-      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-line bg-white px-6 py-3 text-sm">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-b border-line bg-white px-4 py-3 text-sm sm:px-6">
         <Stat value={assets.length} label="Total Assets" strong />
         <span className="h-6 w-px bg-line" />
         <Stat value={running} label="Running" dot="#16a34a" />
@@ -69,10 +69,10 @@ export function MapView({ assets }) {
         </label>
       </div>
 
-      {/* Map + panel */}
-      <div className="relative flex min-h-0 flex-1">
+      {/* Map + panel — side by side on desktop, stacked on mobile/tablet */}
+      <div className="relative flex min-h-0 flex-1 flex-col lg:flex-row">
         {/* Map (real Google Maps when a key is set, schematic otherwise) */}
-        <div className="relative flex-1 overflow-hidden bg-[#e8eef3]">
+        <div className="relative min-h-[45vh] flex-1 overflow-hidden bg-[#e8eef3] lg:min-h-0">
           {MAPS_KEY ? (
             <GoogleMap
               apiKey={MAPS_KEY}
@@ -117,7 +117,7 @@ export function MapView({ assets }) {
         </div>
 
         {/* Detail panel */}
-        <aside className="flex w-[360px] shrink-0 flex-col border-l border-line bg-white">
+        <aside className="flex w-full shrink-0 flex-col border-t border-line bg-white lg:w-90 lg:border-l lg:border-t-0">
           <div className="flex items-start gap-3 border-b border-line p-4">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-good/10">
               <Cpu className="h-4 w-4 text-good" />
@@ -194,7 +194,7 @@ function SchematicRoads() {
   );
 }
 
-function Stat({ value, label, dot, strong, danger }) {
+function Stat({ value, label, dot, danger }) {
   return (
     <div className="flex items-center gap-2">
       {dot && <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: dot }} />}

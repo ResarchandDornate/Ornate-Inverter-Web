@@ -18,7 +18,7 @@ export default async function SiteViewPage() {
   ];
 
   return (
-    <div className="mx-auto max-w-[1400px] px-6 py-5">
+    <div className="mx-auto max-w-350 px-4 py-5 sm:px-6">
       {/* Site header */}
       <div className="mb-5 flex items-center gap-2">
         <Gauge className="h-4 w-4 text-muted" />

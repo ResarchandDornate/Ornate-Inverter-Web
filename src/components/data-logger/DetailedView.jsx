@@ -38,9 +38,9 @@ export function DetailedView({ asset }) {
     .filter(({ p }) => p.label.toLowerCase().includes(query.toLowerCase()));
 
   return (
-    <div className="mx-auto max-w-[1400px] px-6 py-5">
+    <div className="mx-auto max-w-350 px-4 py-5 sm:px-6">
       {/* Header */}
-      <div className="mb-4 flex items-center gap-3">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-good/10">
           <Cpu className="h-5 w-5 text-good" />
         </div>
@@ -54,7 +54,7 @@ export function DetailedView({ asset }) {
           </div>
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <div className="flex rounded-md border border-line bg-white p-0.5 text-xs font-medium">
             <span className="rounded bg-accent px-3 py-1 text-white">Detailed View</span>
             <span className="px-3 py-1 text-muted">Analog View</span>
@@ -86,7 +86,7 @@ export function DetailedView({ asset }) {
               />
             </div>
           </div>
-          <ul className="max-h-[460px] overflow-y-auto py-1">
+          <ul className="max-h-115 overflow-y-auto py-1">
             {filtered.map(({ p, i }) => (
               <li key={p.label}>
                 <button

@@ -1,5 +1,30 @@
 @import "tailwindcss";
 
+/* ---- Data Logger design tokens -------------------------------------------
+ * Ported from the standalone data-logger app so its pages (under
+ * /data-logger/*) render with their own palette inside this portal. These
+ * custom color names don't collide with the portal's standard slate/orange
+ * utilities — they only add bg-brand / text-accent / border-line / bg-canvas /
+ * text-ink / text-muted / bg-panel / text-good|warn|danger / text-solar|mains|dg1|dg2.
+ */
+@theme {
+  --color-brand: #2f6fed;
+  --color-brand-dark: #1e4fb8;
+  --color-accent: #f4801f;
+  --color-solar: #2f6fed;
+  --color-mains: #14b8a6;
+  --color-dg1: #f4801f;
+  --color-dg2: #a855f7;
+  --color-good: #16a34a;
+  --color-warn: #f59e0b;
+  --color-danger: #dc2626;
+  --color-canvas: #f4f6fa;
+  --color-panel: #ffffff;
+  --color-ink: #1f2733;
+  --color-muted: #6b7787;
+  --color-line: #e6e9ef;
+}
+
 :root {
   --background: #f8fafc;
   --foreground: #0f172a;

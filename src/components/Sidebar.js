@@ -9,6 +9,11 @@ import {
   Settings,
   LogOut,
   AlertTriangle,
+  Database,
+  LayoutGrid,
+  Map as MapIcon,
+  LineChart,
+  Bell,
 } from "lucide-react";
 import { clearToken } from "@/lib/auth";
 import { showSuccess } from "@/lib/toast";
@@ -21,9 +26,27 @@ const NAV = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
+// Data Logger is a separate app ported in under /data-logger/*. It talks to its
+// OWN backend (NEXT_PUBLIC_DATALOGGER_API_URL), not the inverter API.
+const DATA_LOGGER_NAV = [
+  { href: "/data-logger", label: "Site View", icon: LayoutDashboard },
+  { href: "/data-logger/assets", label: "Assets", icon: LayoutGrid },
+  { href: "/data-logger/map", label: "Map View", icon: MapIcon },
+  { href: "/data-logger/trends", label: "Trends", icon: LineChart },
+  { href: "/data-logger/alerts", label: "Alerts", icon: Bell },
+  { href: "/data-logger/settings", label: "Settings", icon: Settings },
+];
+
 export default function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+
+  // Which workspace is active is derived from the URL, so navigating anywhere
+  // keeps the toggle in sync. The Inverters/Data Logger toggle just jumps to the
+  // landing page of the other workspace.
+  const inDataLogger = pathname.startsWith("/data-logger");
+  const nav = inDataLogger ? DATA_LOGGER_NAV : NAV;
+  const homeHref = inDataLogger ? "/data-logger" : "/dashboard";
 
   const handleLogout = () => {
     clearToken();
@@ -49,17 +72,49 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* Nav */}
+      {/* Workspace toggle — switch between the Inverter portal and Data Logger */}
+      <div className="px-3 pt-4">
+        <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-800/60 p-1">
+          <button
+            type="button"
+            onClick={() => router.push("/dashboard")}
+            aria-pressed={!inDataLogger}
+            className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition ${
+              !inDataLogger
+                ? "bg-orange-500/15 text-orange-400"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <Zap size={14} />
+            Inverters
+          </button>
+          <button
+            type="button"
+            onClick={() => router.push("/data-logger")}
+            aria-pressed={inDataLogger}
+            className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-semibold transition ${
+              inDataLogger
+                ? "bg-orange-500/15 text-orange-400"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <Database size={14} />
+            Data Logger
+          </button>
+        </div>
+      </div>
+
+      {/* Nav — reflects the active workspace */}
       <nav className="flex-1 px-3 py-4 overflow-y-auto">
         <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-3 mb-2">
-          Workspace
+          {inDataLogger ? "Data Logger" : "Workspace"}
         </p>
         <ul className="space-y-1">
-          {NAV.map((item) => {
+          {nav.map((item) => {
             const Icon = item.icon;
             const active =
               pathname === item.href ||
-              (item.href !== "/dashboard" && pathname.startsWith(item.href));
+              (item.href !== homeHref && pathname.startsWith(item.href));
             return (
               <li key={item.href}>
                 <Link

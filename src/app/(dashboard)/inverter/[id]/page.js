@@ -94,7 +94,7 @@ function exportReadingsToCsv(records, inverterId) {
     r.grid_connected ? "Yes" : "No",
     r.fault_bitmask ?? 0,
     r.hw_fault ? "Yes" : "No",
-    r.queued_offline ? "Backlog" : "Live",
+    r.timestamp_is_estimated ? "Estimated" : r.queued_offline ? "Backlog" : "Live",
   ]);
 
   const escape = (cell) => {
@@ -491,6 +491,18 @@ export default function InverterDetailsPage() {
     if (!generationData.length) return 0;
     return generationData.reduce((s, d) => s + parseFloat(d.power_out || 0), 0) / generationData.length;
   }, [generationData]);
+
+  // Latest PowerGeneration hour-bucket behind the Daily Energy figure, so the
+  // card shows WHEN that total is as-of instead of just a bare number.
+  const latestBucketTime = useMemo(() => {
+    const buckets = hourlyEnergyData?.results || [];
+    if (!buckets.length) return null;
+    return buckets.reduce(
+      (latest, b) =>
+        !latest || new Date(b.measurement_time) > new Date(latest) ? b.measurement_time : latest,
+      null
+    );
+  }, [hourlyEnergyData]);
 
   return (
     <>
@@ -945,22 +957,30 @@ export default function InverterDetailsPage() {
                           // heuristic, silently hiding a real backlog flag. Matches the
                           // CSV export's logic below, which already does this correctly.
                           const isBacklog = item.queued_offline;
+                          // Estimated takes priority over Backlog/Live — it's a different
+                          // kind of uncertainty (the TIME itself isn't real, not just old).
+                          const isEstimated = item.timestamp_is_estimated;
                           return (
                           <tr
                             key={item.id || index}
                             className="border-b border-slate-100 hover:bg-slate-50"
                           >
-                            <td className="px-5 py-2.5 text-center text-slate-700 font-mono text-xs whitespace-nowrap">
+                            <td
+                              className={`px-5 py-2.5 text-center font-mono text-xs whitespace-nowrap ${isEstimated ? "text-purple-600" : "text-slate-700"}`}
+                              title={isEstimated ? "Device clock was not synced — this is arrival time, not the device's real reading time" : undefined}
+                            >
                               {/* Show the date whenever the reading isn't from today, so
                                   real past generation times can't be mistaken for "now". */}
-                              {format(ts, isToday ? "HH:mm:ss" : "dd MMM, HH:mm:ss")}
+                              {isEstimated ? "~ " : ""}{format(ts, isToday ? "HH:mm:ss" : "dd MMM, HH:mm:ss")}
                             </td>
                             <td className="px-5 py-2.5 text-center text-slate-700">{parseFloat(item.voltage).toFixed(1)}</td>
                             <td className="px-5 py-2.5 text-center text-slate-700">{parseFloat(item.current).toFixed(2)}</td>
                             <td className="px-5 py-2.5 text-center font-semibold text-orange-600">{parseFloat(item.power_out).toFixed(0)}</td>
                             <td className="px-5 py-2.5 text-center text-slate-700">{item.temperature ?? "—"}</td>
                             <td className="px-5 py-2.5 text-center">
-                              {isBacklog
+                              {isEstimated
+                                ? <span className="inline-block rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-semibold text-purple-700" title="Device clock not synced — time shown is estimated arrival time, not a real reading time">Estimated</span>
+                                : isBacklog
                                 ? <span className="inline-block rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700" title="Replayed from the device's offline buffer — the time shown is the real reading time, not now">Backlog</span>
                                 : <span className="text-[10px] text-slate-400">Live</span>}
                             </td>

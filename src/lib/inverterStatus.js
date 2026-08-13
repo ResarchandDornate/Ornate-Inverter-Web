@@ -50,9 +50,10 @@ export function isLive(inv) {
   return LIVE_STATUSES.includes(computeStatus(inv));
 }
 // The device is connected and actively reporting (either live OR replaying its
-// offline backlog). Used where "is it talking to us right now?" matters.
+// offline backlog, OR pinging with an unsynced clock). Used where "is it
+// talking to us right now?" matters — as opposed to "is valid data landing?"
 export function isReportingStatus(status) {
-  return status === "live" || status === "online" || status === "recovering";
+  return status === "live" || status === "online" || status === "recovering" || status === "unsynced";
 }
 
 export function computeStatus(inv) {
@@ -60,6 +61,9 @@ export function computeStatus(inv) {
 
   // Trust the explicit status string first.
   if (inv?.status === "offline") return "offline";
+  // "unsynced" — device is pinging right now but its clock isn't synced, so
+  // nothing it sends is being stored. Distinct from "live" (data IS landing).
+  if (inv?.status === "unsynced") return "unsynced";
   // "recovering" — device reconnected and is replaying its offline backlog;
   // it hasn't caught up to live data yet.
   if (inv?.status === "recovering") return "recovering";

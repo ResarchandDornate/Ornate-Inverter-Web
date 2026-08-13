@@ -7,8 +7,8 @@ import { format } from "date-fns";
 import {
   BarChart,
   Bar,
-  LineChart,
-  Line,
+  AreaChart,
+  Area,
   XAxis,
   YAxis,
   CartesianGrid,
@@ -125,7 +125,10 @@ function exportReadingsToCsv(records, inverterId) {
 export default function InverterDetailsPage() {
   const { id: inverterId } = useParams();
   const [tab, setTab] = useState("overview");
-  const [chartRange, setChartRange] = useState("10m");
+  // Default to the weekly view so the page opens on the recorded HISTORY
+  // (previous days of generation) instead of just the last 10 minutes — which
+  // looked empty/"no previous data" on load. Live/raw views are one click away.
+  const [chartRange, setChartRange] = useState("1w");
   const [chartType] = useChartType(); // global "bar" | "line" from Settings
   const [customDate, setCustomDate] = useState(() =>
     new Date().toISOString().split("T")[0]
@@ -136,24 +139,27 @@ export default function InverterDetailsPage() {
 
   // Fetch ALL of today's readings (date-filtered).
   const {
-    data: inverterHistory,
-    isLoading,
-    refetch: onRefresh,
+    data: todayHistory,
+    isLoading: isLoadingToday,
+    refetch: refetchToday,
     isRefetching,
   } = useQuery({
     queryKey: [...QUERY_KEYS.INVERTER_DETAILS(inverterId), todayStr],
     queryFn: async () => {
-      // Use the backend's new `range=1d` preset so the page always loads with
-      // the last 24h of data on hand. This means:
-      //   - "Last 10 min" / "Last 1 hour" tabs always have history to show
-      //     immediately after page reload (no waiting + no empty chart)
-      //   - Even right after midnight, the chart spans the previous evening
-      //     instead of showing only the few minutes of "today"
-      const MAX_PAGES = 20; // 20 × 100 = up to 2000 records (~2.8h of 5s samples)
+      // Fetch strictly by the device's own reading timestamp — no backend
+      // arrival-order logic. `?date=` windows on `timestamp` (see backend
+      // `apply_time_filters`), `?ordering=-timestamp` sorts the same way, so
+      // rows always reflect true chronological reading order. A backlog
+      // point still displays fine (its own real `timestamp` places it
+      // correctly on today's date) — it just won't jump to the top of the
+      // table purely because it arrived late; it appears where its actual
+      // reading time puts it, on whichever date it belongs to.
+      const MAX_PAGES = 20; // 20 × 100 = up to 2000 records for the day
       const allData = [];
       const baseUrl =
         `/inverter/inverter-data/?inverter=${inverterId}` +
-        `&range=1d&ordering=-timestamp`;
+        `&date=${todayStr}` +
+        `&ordering=-timestamp`;
 
       for (let page = 1; page <= MAX_PAGES; page++) {
         const url = page === 1 ? baseUrl : `${baseUrl}&page=${page}`;
@@ -169,7 +175,6 @@ export default function InverterDetailsPage() {
         if (!response.next) break;
       }
 
-      allData.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
       return allData;
     },
     enabled: !!inverterId,
@@ -182,6 +187,38 @@ export default function InverterDetailsPage() {
     // background-tab poll, matching the list pages' useLiveInverters.
     refetchOnWindowFocus: true,
   });
+
+  const isTodayEmpty = !isLoadingToday && (todayHistory?.length ?? 0) === 0;
+
+  // Today can be genuinely empty (device silent, or its only recent readings
+  // turned out to be mistimed and got corrected onto an earlier day) without
+  // the device having no history at all. Rather than show "No data available"
+  // while years of real readings sit one day back, fall back to the most
+  // recent readings on record, whatever day they fall on. This is a SEPARATE
+  // query on its own slow cadence — historical data doesn't need the 10s
+  // live-poll rate above, and only fires once today is confirmed empty, so
+  // it never doubles up the fast poll's request rate.
+  const {
+    data: fallbackHistory,
+    isLoading: isLoadingFallback,
+    refetch: refetchFallback,
+  } = useQuery({
+    queryKey: ["inverterHistoryFallback", inverterId],
+    queryFn: () =>
+      getData(`/inverter/inverter-data/?inverter=${inverterId}&ordering=-timestamp`)
+        .then((r) => r?.results || []),
+    enabled: !!inverterId && isTodayEmpty,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+  });
+
+  const inverterHistory = isTodayEmpty ? (fallbackHistory || []) : (todayHistory || []);
+  const isLoading = isLoadingToday || (isTodayEmpty && isLoadingFallback);
+  const onRefresh = () => {
+    refetchToday();
+    if (isTodayEmpty) refetchFallback();
+  };
 
   // Real daily energy from backend hourly aggregates (accurate; survives
   // missed polls/page reloads instead of being a client-side integration).
@@ -206,7 +243,18 @@ export default function InverterDetailsPage() {
   });
 
   const generationData = inverterHistory || [];
-  const latestReading = generationData[0] || {};
+  // "Current/live" values must come from a FRESH LIVE reading — never a backlog
+  // (queued_offline) point, and never a stale live reading. Backlog points are
+  // buffered history the device replayed with no real time of their own; we
+  // stamp them with arrival time so they're recorded, but they must NOT
+  // masquerade as the current output. generationData is newest-first.
+  const LIVE_FRESH_MS = 15 * 60 * 1000; // matches backend online window
+  const latestLive = generationData.find((d) => !d.queued_offline);
+  const hasLiveReading = !!(
+    latestLive &&
+    Date.now() - new Date(latestLive.timestamp).getTime() <= LIVE_FRESH_MS
+  );
+  const latestReading = hasLiveReading ? latestLive : {};
   // Merge status endpoint with latest telemetry record for one unified shape.
   const merged = {
     ...latestReading,
@@ -227,10 +275,11 @@ export default function InverterDetailsPage() {
   // true, so grid off (or no data) makes status "offline" and the grid reads
   // OFF. `grid_connected` here is the backend `grid_on` value.
   const readingGridConnected = gridConnected === true;
-  // "offline" collapses Voltage/Current/Temp/VPV/IPV to 0. Grid-off now implies
-  // offline (they're coupled), so this — driven by status/is_online — already
-  // covers the grid-off case; the whole card set flips together.
-  const offline = offlineByConnectivity;
+  // "offline" collapses Voltage/Current/Temp/VPV/IPV to 0. It's true when the
+  // device isn't communicating OR when there's no LIVE reading to show (e.g. the
+  // device is only replaying backlog — recovering). That keeps the current
+  // cards from rendering a backlog value (or NaN) as if it were live.
+  const offline = offlineByConnectivity || !hasLiveReading;
   const bitmask = parseFaultBitmask(latestReading.fault_bitmask);
   const hasFault = hasActiveFault(latestReading);
 
@@ -275,6 +324,9 @@ export default function InverterDetailsPage() {
 
     if (currentRange.source === "raw") {
       const cutoff = Date.now() - currentRange.windowMin * 60 * 1000;
+      // The trend charts show ALL recorded telemetry in the window, including
+      // replayed backlog — so previous data stays visible. Only the "current"
+      // headline (W output / Last seen) is restricted to fresh live readings.
       const filtered = generationData
         .filter((d) => new Date(d.timestamp).getTime() >= cutoff)
         .map((d) => ({
@@ -326,10 +378,20 @@ export default function InverterDetailsPage() {
       // backend may store records at HH:30 inside the hour, so we bucket each
       // record by floor(timestamp / 1h) and lookup by hour-start key.
       const HOUR_MS = 60 * 60 * 1000;
+      // Floor an epoch to the viewer's LOCAL hour boundary. The axis labels and
+      // the custom-day window are both in local time, so records must bucket on
+      // local hours too. Flooring on UTC (Math.floor(t/HOUR_MS)) instead made
+      // the Custom-date tab miss every record for non-UTC browsers (e.g. IST,
+      // where local midnight is 18:30 UTC — a :30 offset that never lines up
+      // with a UTC hour key), rendering an all-zero day.
+      const localHourFloor = (ms) => {
+        const d = new Date(ms);
+        d.setMinutes(0, 0, 0);
+        return d.getTime();
+      };
       const byHour = new Map();
       records.forEach((r) => {
-        const t = new Date(r.measurement_time).getTime();
-        const key = Math.floor(t / HOUR_MS) * HOUR_MS;
+        const key = localHourFloor(new Date(r.measurement_time).getTime());
         if (!byHour.has(key)) byHour.set(key, { powerSum: 0, count: 0, energy: 0 });
         const b = byHour.get(key);
         b.powerSum += parseFloat(r.avg_power || 0);
@@ -337,23 +399,22 @@ export default function InverterDetailsPage() {
         b.energy += parseFloat(r.energy_generated || 0);
       });
 
-      // Pick the 24-hour window:
+      // Pick the 24-hour window (all local-hour aligned):
       //  - "1d": rolling — from current-hour-23 to current-hour
-      //  - "custom": that calendar day 00:00–23:00
+      //  - "custom": that calendar day 00:00–23:00 local
       let startHourMs;
       if (chartRange === "custom") {
         const dt = new Date(`${customDate}T00:00:00`);
         dt.setHours(0, 0, 0, 0);
         startHourMs = dt.getTime();
       } else {
-        const currentHour = Math.floor(Date.now() / HOUR_MS) * HOUR_MS;
-        startHourMs = currentHour - 23 * HOUR_MS;
+        startHourMs = localHourFloor(Date.now()) - 23 * HOUR_MS;
       }
 
       const series = [];
       for (let i = 0; i < 24; i++) {
         const t = startHourMs + i * HOUR_MS;
-        const b = byHour.get(t);
+        const b = byHour.get(localHourFloor(t));
         const avg = b && b.count ? b.powerSum / b.count : 0;
         series.push({
           t,
@@ -454,7 +515,9 @@ export default function InverterDetailsPage() {
                 {offline ? "0" : parseFloat(latestReading.power_out || 0).toFixed(0)} <span className="text-sm text-slate-400 font-normal">W output</span>
               </h2>
               <p className="text-[11px] text-slate-400 mt-1">
-                Last seen {formatLastSeen(gridStatusData?.last_seen)}
+                {hasLiveReading
+                  ? `Last seen ${formatLastSeen(latestReading.timestamp)}`
+                  : "No live data — replaying backlog"}
               </p>
             </div>
           </div>
@@ -689,12 +752,18 @@ export default function InverterDetailsPage() {
                           the data chart's left margin matches the sticky Y-axis. */}
                       <div className="overflow-x-auto scrollbar-thin" style={{ height: 420 }}>
                         {chartType === "line" ? (
-                          <LineChart
+                          <AreaChart
                             width={scrollWidth}
                             height={420}
                             data={chartData}
                             margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
                           >
+                            <defs>
+                              <linearGradient id="powerFill" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#5B6BB5" stopOpacity={0.28} />
+                                <stop offset="100%" stopColor="#5B6BB5" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
                             <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
                             <XAxis
                               dataKey="time"
@@ -720,17 +789,18 @@ export default function InverterDetailsPage() {
                               }}
                               contentStyle={{ fontSize: 12, borderRadius: 8 }}
                             />
-                            <Line
+                            <Area
                               type="monotone"
                               connectNulls
                               dataKey="power"
                               stroke="#5B6BB5"
                               strokeWidth={2}
+                              fill="url(#powerFill)"
                               dot={{ r: 2, fill: "#5B6BB5", strokeWidth: 0 }}
                               activeDot={{ r: 5 }}
                               isAnimationActive={false}
                             />
-                          </LineChart>
+                          </AreaChart>
                         ) : (
                           <BarChart
                             width={scrollWidth}
@@ -777,7 +847,13 @@ export default function InverterDetailsPage() {
                     <div style={{ width: "100%", height: 420 }}>
                       <ResponsiveContainer width="100%" height="100%">
                         {chartType === "line" ? (
-                          <LineChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                          <AreaChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                            <defs>
+                              <linearGradient id="powerFillResponsive" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="#5B6BB5" stopOpacity={0.28} />
+                                <stop offset="100%" stopColor="#5B6BB5" stopOpacity={0} />
+                              </linearGradient>
+                            </defs>
                             <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
                             <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={20} />
                             <YAxis domain={[0, "auto"]} tick={{ fontSize: 10, fill: "#6B7280" }} unit={yUnit} width={70} />
@@ -794,17 +870,18 @@ export default function InverterDetailsPage() {
                               }}
                               contentStyle={{ fontSize: 12, borderRadius: 8 }}
                             />
-                            <Line
+                            <Area
                               type="monotone"
                               connectNulls
                               dataKey="power"
                               stroke="#5B6BB5"
                               strokeWidth={2}
+                              fill="url(#powerFillResponsive)"
                               dot={{ r: 2, fill: "#5B6BB5", strokeWidth: 0 }}
                               activeDot={{ r: 5 }}
                               isAnimationActive={false}
                             />
-                          </LineChart>
+                          </AreaChart>
                         ) : (
                           <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
                             <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
@@ -854,25 +931,42 @@ export default function InverterDetailsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {generationData.map((item, index) => (
+                        {generationData.map((item, index) => {
+                          const ts = new Date(item.timestamp);
+                          const now = new Date();
+                          const isToday =
+                            ts.getFullYear() === now.getFullYear() &&
+                            ts.getMonth() === now.getMonth() &&
+                            ts.getDate() === now.getDate();
+                          // Trust the backend's own queued_offline flag directly — no
+                          // "is it recent enough" second-guessing here. A device that
+                          // sends backlog points promptly (small created_at − timestamp
+                          // gap) would otherwise always read as "Live" under a freshness
+                          // heuristic, silently hiding a real backlog flag. Matches the
+                          // CSV export's logic below, which already does this correctly.
+                          const isBacklog = item.queued_offline;
+                          return (
                           <tr
                             key={item.id || index}
                             className="border-b border-slate-100 hover:bg-slate-50"
                           >
-                            <td className="px-5 py-2.5 text-center text-slate-700 font-mono text-xs">
-                              {format(new Date(item.timestamp), "HH:mm:ss")}
+                            <td className="px-5 py-2.5 text-center text-slate-700 font-mono text-xs whitespace-nowrap">
+                              {/* Show the date whenever the reading isn't from today, so
+                                  real past generation times can't be mistaken for "now". */}
+                              {format(ts, isToday ? "HH:mm:ss" : "dd MMM, HH:mm:ss")}
                             </td>
                             <td className="px-5 py-2.5 text-center text-slate-700">{parseFloat(item.voltage).toFixed(1)}</td>
                             <td className="px-5 py-2.5 text-center text-slate-700">{parseFloat(item.current).toFixed(2)}</td>
                             <td className="px-5 py-2.5 text-center font-semibold text-orange-600">{parseFloat(item.power_out).toFixed(0)}</td>
                             <td className="px-5 py-2.5 text-center text-slate-700">{item.temperature ?? "—"}</td>
                             <td className="px-5 py-2.5 text-center">
-                              {item.queued_offline
-                                ? <span className="inline-block rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700" title="Published from the device's offline backlog — timestamp is the real reading time">Backlog</span>
+                              {isBacklog
+                                ? <span className="inline-block rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700" title="Replayed from the device's offline buffer — the time shown is the real reading time, not now">Backlog</span>
                                 : <span className="text-[10px] text-slate-400">Live</span>}
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

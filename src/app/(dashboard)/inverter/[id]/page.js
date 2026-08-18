@@ -94,7 +94,7 @@ function exportReadingsToCsv(records, inverterId) {
     r.grid_connected ? "Yes" : "No",
     r.fault_bitmask ?? 0,
     r.hw_fault ? "Yes" : "No",
-    r.timestamp_is_estimated ? "Estimated" : r.queued_offline ? "Backlog" : "Live",
+    r.queued_offline || r.timestamp_is_estimated ? "Backlog" : "Live",
   ]);
 
   const escape = (cell) => {
@@ -137,101 +137,84 @@ export default function InverterDetailsPage() {
   // Memoize so the queryKey stays stable across renders (only changes at midnight).
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
 
-  // Fetch ALL of today's readings (date-filtered).
+  // Two separate queries, deliberately NOT one — they have opposite freshness
+  // needs and opposite size:
+  //
+  // 1. recentHistory — small (one page, ~100 rows), fast 10s poll. Drives the
+  //    live-status cards (Voltage/Current/.../Grid Status) and the raw 10min/
+  //    1h chart views, all of which need to be fresh, not exhaustive.
+  // 2. fullHistory — the Detailed Readings table's feed, windowed by the
+  //    table's own range dropdown (24h/week/month/all), fetched once per
+  //    range (+ manual refresh) with NO poll. The server filters the window
+  //    (?timestamp__gte) and returns up to 5000 rows/request, so the default
+  //    week view is ONE fast request instead of the old crawl of 50+
+  //    sequential 100-row pages (~8 s of blank table).
   const {
-    data: todayHistory,
-    isLoading: isLoadingToday,
-    refetch: refetchToday,
+    data: recentHistory,
+    isLoading,
+    refetch: refetchRecent,
     isRefetching,
   } = useQuery({
-    queryKey: [...QUERY_KEYS.INVERTER_DETAILS(inverterId), todayStr],
-    queryFn: async () => {
-      // Fetch strictly by the device's own reading timestamp — no backend
-      // arrival-order logic. `?date=` windows on `timestamp` (see backend
-      // `apply_time_filters`), `?ordering=-timestamp` sorts the same way, so
-      // rows always reflect true chronological reading order. A backlog
-      // point still displays fine (its own real `timestamp` places it
-      // correctly on today's date) — it just won't jump to the top of the
-      // table purely because it arrived late; it appears where its actual
-      // reading time puts it, on whichever date it belongs to.
-      const MAX_PAGES = 20; // 20 × 100 = up to 2000 records for the day
-      const allData = [];
-      const baseUrl =
-        `/inverter/inverter-data/?inverter=${inverterId}` +
-        `&date=${todayStr}` +
-        `&ordering=-timestamp`;
-
-      for (let page = 1; page <= MAX_PAGES; page++) {
-        const url = page === 1 ? baseUrl : `${baseUrl}&page=${page}`;
-        let response;
-        try {
-          response = await getData(url);
-        } catch {
-          break; // 404 once we run out of pages
-        }
-        const results = response?.results || [];
-        if (results.length === 0) break;
-        allData.push(...results);
-        if (!response.next) break;
-      }
-
-      return allData;
-    },
+    queryKey: [...QUERY_KEYS.INVERTER_DETAILS(inverterId), "recent"],
+    queryFn: () =>
+      getData(`/inverter/inverter-data/?inverter=${inverterId}&ordering=-timestamp`)
+        .then((r) => r?.results || []),
     enabled: !!inverterId,
     // 10 s matches useLiveInverters so status + telemetry flip in the same cycle.
     refetchInterval: 10000,
     staleTime: 9000,
-    gcTime: 30 * 60 * 1000,          // keep 24h of readings cached for 30 min after unmount
+    gcTime: 30 * 60 * 1000,
     // This feeds latestReading (Voltage/Current/Temp/PF cards) — refetch on
     // focus so it re-syncs immediately instead of waiting out a throttled
     // background-tab poll, matching the list pages' useLiveInverters.
     refetchOnWindowFocus: true,
   });
 
-  const isTodayEmpty = !isLoadingToday && (todayHistory?.length ?? 0) === 0;
-
-  // Today can be genuinely empty (device silent, or its only recent readings
-  // turned out to be mistimed and got corrected onto an earlier day) without
-  // the device having no history at all. Rather than show "No data available"
-  // while years of real readings sit one day back, fall back to the most
-  // recent readings on record, whatever day they fall on. This is a SEPARATE
-  // query on its own slow cadence — historical data doesn't need the 10s
-  // live-poll rate above, and only fires once today is confirmed empty, so
-  // it never doubles up the fast poll's request rate.
+  // Table range filter + scroll-extended rendering: only the first chunk of
+  // rows hits the DOM; scrolling near the bottom appends more, so even "all
+  // history" (thousands of rows) stays smooth.
+  const [readingsRange, setReadingsRange] = useState("week");
+  const [visibleCount, setVisibleCount] = useState(150);
   const {
-    data: fallbackHistory,
-    isLoading: isLoadingFallback,
-    refetch: refetchFallback,
+    data: fullHistory,
+    isLoading: isLoadingFullHistory,
+    refetch: refetchFullHistory,
   } = useQuery({
-    queryKey: ["inverterHistoryFallback", inverterId],
-    queryFn: () =>
-      getData(`/inverter/inverter-data/?inverter=${inverterId}&ordering=-timestamp`)
-        .then((r) => r?.results || []),
-    enabled: !!inverterId && isTodayEmpty,
-    staleTime: 5 * 60 * 1000,
-    refetchInterval: 5 * 60 * 1000,
+    queryKey: [...QUERY_KEYS.INVERTER_DETAILS(inverterId), "readings", readingsRange],
+    queryFn: async () => {
+      const RANGE_MS = { "24h": 24 * 3600e3, week: 7 * 24 * 3600e3, month: 30 * 24 * 3600e3 };
+      let base = `/inverter/inverter-data/?inverter=${inverterId}&ordering=-timestamp&page_size=5000`;
+      if (readingsRange !== "all") {
+        const since = new Date(Date.now() - RANGE_MS[readingsRange]).toISOString();
+        base += `&timestamp__gte=${encodeURIComponent(since)}`;
+      }
+      const MAX_PAGES = 40; // 40 × 5000 = 200k rows — a generous ceiling, not a silent cap in practice
+      const allData = [];
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const url = page === 1 ? base : `${base}&page=${page}`;
+        let response;
+        try {
+          response = await getData(url);
+        } catch {
+          break;
+        }
+        const results = response?.results || [];
+        if (results.length === 0) break;
+        allData.push(...results);
+        if (!response.next) break;
+      }
+      return allData;
+    },
+    enabled: !!inverterId,
+    staleTime: 5 * 60 * 1000,   // historical — 5 min is plenty fresh
+    refetchInterval: false,     // NEVER auto-poll — this is the whole point
     gcTime: 30 * 60 * 1000,
   });
 
-  const inverterHistory = isTodayEmpty ? (fallbackHistory || []) : (todayHistory || []);
-  const isLoading = isLoadingToday || (isTodayEmpty && isLoadingFallback);
   const onRefresh = () => {
-    refetchToday();
-    if (isTodayEmpty) refetchFallback();
+    refetchRecent();
+    refetchFullHistory();
   };
-
-  // Real daily energy from backend hourly aggregates (accurate; survives
-  // missed polls/page reloads instead of being a client-side integration).
-  const { data: hourlyEnergyData } = useQuery({
-    queryKey: ["inverterDailyEnergy", inverterId, todayStr],
-    queryFn: () =>
-      getData(
-        `/inverter/power-generation/?inverter=${inverterId}&date=${todayStr}&ordering=measurement_time`
-      ),
-    enabled: !!inverterId,
-    refetchInterval: 30000,
-    staleTime: 25000,
-  });
 
   // Status endpoint /grid_status/ gives us authoritative status + last_seen.
   const { data: gridStatusData } = useQuery({
@@ -242,14 +225,18 @@ export default function InverterDetailsPage() {
     staleTime: 8000,
   });
 
-  const generationData = inverterHistory || [];
+  // Live cards + the raw (10min/1h) chart use the small, fast-polled
+  // recentHistory — never the full-history fetch, which can be thousands of
+  // rows and isn't kept fresh on the 10s cycle.
+  const recentData = recentHistory || [];
+  const fullHistoryData = fullHistory || [];
   // "Current/live" values must come from a FRESH LIVE reading — never a backlog
   // (queued_offline) point, and never a stale live reading. Backlog points are
   // buffered history the device replayed with no real time of their own; we
   // stamp them with arrival time so they're recorded, but they must NOT
-  // masquerade as the current output. generationData is newest-first.
+  // masquerade as the current output. recentData is newest-first.
   const LIVE_FRESH_MS = 15 * 60 * 1000; // matches backend online window
-  const latestLive = generationData.find((d) => !d.queued_offline);
+  const latestLive = recentData.find((d) => !d.queued_offline);
   const hasLiveReading = !!(
     latestLive &&
     Date.now() - new Date(latestLive.timestamp).getTime() <= LIVE_FRESH_MS
@@ -302,12 +289,34 @@ export default function InverterDetailsPage() {
 
   const { data: chartPgData, isLoading: chartPgLoading } = useQuery({
     queryKey: ["chartPg", inverterId, chartRange, customDate],
-    queryFn: () =>
-      getData(
+    queryFn: async () => {
+      // The backend's pagination is a standard PageNumberPagination (100/page)
+      // that does NOT honor a client `?limit=` override — passing limit=5000
+      // silently did nothing, so a week (~168 hourly buckets) or month (~720)
+      // was truncated to whatever page 1 happened to return, with the `next`
+      // page just ignored. Paginate through properly instead, same pattern as
+      // the other full-fetch queries on this page.
+      const MAX_PAGES = 50; // 50 × 100 = up to 5,000 buckets — comfortably covers a year of hourly data
+      const allResults = [];
+      const baseUrl =
         `/inverter/power-generation/?inverter=${inverterId}` +
-          `&${pgQueryFilter}` +
-          `&ordering=measurement_time&limit=5000`
-      ),
+        `&${pgQueryFilter}` +
+        `&ordering=measurement_time`;
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const url = page === 1 ? baseUrl : `${baseUrl}&page=${page}`;
+        let response;
+        try {
+          response = await getData(url);
+        } catch {
+          break;
+        }
+        const results = response?.results || [];
+        if (results.length === 0) break;
+        allResults.push(...results);
+        if (!response.next) break;
+      }
+      return { results: allResults };
+    },
     enabled: !!inverterId && !!pgQueryFilter,
     refetchInterval: 5 * 60 * 1000,
     staleTime: 5 * 60 * 1000,        // treat data fresh for 5 min — no refetch when re-entering tab
@@ -327,7 +336,7 @@ export default function InverterDetailsPage() {
       // The trend charts show ALL recorded telemetry in the window, including
       // replayed backlog — so previous data stays visible. Only the "current"
       // headline (W output / Last seen) is restricted to fresh live readings.
-      const filtered = generationData
+      const filtered = recentData
         .filter((d) => new Date(d.timestamp).getTime() >= cutoff)
         .map((d) => ({
           t: new Date(d.timestamp).getTime(),
@@ -460,7 +469,7 @@ export default function InverterDetailsPage() {
       });
     }
     return series;
-  }, [currentRange, generationData, chartPgData]);
+  }, [currentRange, recentData, chartPgData]);
 
   const yUnit = currentRange.source === "pg" ? " W avg" : " W";
   // Scroll once bars would otherwise be < ~20 px wide. Drops the threshold
@@ -469,40 +478,29 @@ export default function InverterDetailsPage() {
   const needsScroll = chartData.length > 40;
   const scrollWidth = needsScroll ? Math.max(800, chartData.length * 22) : 0;
 
-  // Sum hourly buckets returned by /power-generation/ for today.
-  const dailyEnergyKwh = useMemo(() => {
-    const buckets = hourlyEnergyData?.results || [];
-    return buckets.reduce(
-      (sum, b) => sum + parseFloat(b.energy_generated || 0),
-      0
-    );
-  }, [hourlyEnergyData]);
-
-  // Peak hourly avg_power from backend (more meaningful than instantaneous peak).
-  const peakHourPowerW = useMemo(() => {
-    const buckets = hourlyEnergyData?.results || [];
-    return buckets.reduce(
-      (max, b) => Math.max(max, parseFloat(b.avg_power || 0)),
-      0
-    );
-  }, [hourlyEnergyData]);
+  // Total generation for whichever range tab is currently selected — NOT
+  // hard-coded to "today" the way the old Daily Energy card was (which stayed
+  // fixed on today's total even while you browsed a different range tab on
+  // the chart right next to it). pg-source ranges (24h/week/month/custom)
+  // sum the same backend hourly buckets the chart itself renders from, so the
+  // number always matches what's on screen. raw-source ranges (10min/1h) have
+  // no PowerGeneration buckets to sum — approximate from recentData instead.
+  const totalGenerationKwh = useMemo(() => {
+    if (currentRange.source === "pg") {
+      const buckets = chartPgData?.results || [];
+      return buckets.reduce((sum, b) => sum + parseFloat(b.energy_generated || 0), 0);
+    }
+    const cutoff = Date.now() - currentRange.windowMin * 60 * 1000;
+    const windowReadings = recentData.filter((d) => new Date(d.timestamp).getTime() >= cutoff);
+    if (!windowReadings.length) return 0;
+    const avgW = windowReadings.reduce((s, d) => s + parseFloat(d.power_out || 0), 0) / windowReadings.length;
+    return (avgW * (currentRange.windowMin / 60)) / 1000;
+  }, [currentRange, chartPgData, recentData]);
 
   const avgPowerW = useMemo(() => {
-    if (!generationData.length) return 0;
-    return generationData.reduce((s, d) => s + parseFloat(d.power_out || 0), 0) / generationData.length;
-  }, [generationData]);
-
-  // Latest PowerGeneration hour-bucket behind the Daily Energy figure, so the
-  // card shows WHEN that total is as-of instead of just a bare number.
-  const latestBucketTime = useMemo(() => {
-    const buckets = hourlyEnergyData?.results || [];
-    if (!buckets.length) return null;
-    return buckets.reduce(
-      (latest, b) =>
-        !latest || new Date(b.measurement_time) > new Date(latest) ? b.measurement_time : latest,
-      null
-    );
-  }, [hourlyEnergyData]);
+    if (!recentData.length) return 0;
+    return recentData.reduce((s, d) => s + parseFloat(d.power_out || 0), 0) / recentData.length;
+  }, [recentData]);
 
   return (
     <>
@@ -536,8 +534,8 @@ export default function InverterDetailsPage() {
           <div className="flex items-center gap-3 flex-wrap">
             <StatusBadge status={status} />
             <button
-              onClick={() => exportReadingsToCsv(generationData, inverterId)}
-              disabled={!generationData.length}
+              onClick={() => exportReadingsToCsv(fullHistoryData, inverterId)}
+              disabled={!fullHistoryData.length}
               className="flex items-center gap-2 px-3 py-2 text-xs font-semibold rounded-lg border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
               title="Download readings as CSV (opens in Excel)"
             >
@@ -572,12 +570,12 @@ export default function InverterDetailsPage() {
         </div>
 
         {/* Tab content */}
-        {isLoading && !generationData.length ? (
+        {isLoading && !recentData.length ? (
           <div className="flex flex-col items-center justify-center py-20">
             <RefreshCw size={32} className="animate-spin text-orange-500" />
             <p className="text-sm text-slate-500 mt-3">Loading inverter data…</p>
           </div>
-        ) : generationData.length === 0 ? (
+        ) : recentData.length === 0 ? (
           <div className="bg-white rounded-xl border border-slate-200 py-16 text-center">
             <Activity size={36} className="text-slate-400 mx-auto mb-3" />
             <h3 className="text-slate-800 font-bold mb-1">No data available</h3>
@@ -665,22 +663,19 @@ export default function InverterDetailsPage() {
 
             {tab === "generation" && (
               <>
-                {/* Daily summary stats */}
-                <section className="grid grid-cols-3 gap-3 mb-4">
+                {/* Summary stats — both scoped to whichever range tab is selected below
+                    (Last 10 min / 1h / 24h / week / month / custom), not hard-coded to
+                    "today" regardless of what the chart is showing. */}
+                <section className="grid grid-cols-2 gap-3 mb-4">
                   <div className="bg-white rounded-xl border border-slate-200 p-4">
-                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Daily Energy</p>
-                    <p className="text-2xl font-bold text-blue-600">{dailyEnergyKwh.toFixed(3)}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">kWh generated today</p>
-                  </div>
-                  <div className="bg-white rounded-xl border border-slate-200 p-4">
-                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Peak Power</p>
-                    <p className="text-2xl font-bold text-orange-600">{(peakHourPowerW / 1000).toFixed(2)}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">kW hourly max</p>
+                    <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Total Generation</p>
+                    <p className="text-2xl font-bold text-blue-600">{totalGenerationKwh.toFixed(3)}</p>
+                    <p className="text-xs text-slate-400 mt-0.5">kWh · {currentRange.label}</p>
                   </div>
                   <div className="bg-white rounded-xl border border-slate-200 p-4">
                     <p className="text-xs text-slate-500 font-semibold uppercase tracking-wider mb-1">Avg Power</p>
                     <p className="text-2xl font-bold text-slate-700">{(avgPowerW / 1000).toFixed(2)}</p>
-                    <p className="text-xs text-slate-400 mt-0.5">kW average · {generationData.length} readings</p>
+                    <p className="text-xs text-slate-400 mt-0.5">kW average · {recentData.length} recent readings</p>
                   </div>
                 </section>
 
@@ -926,11 +921,46 @@ export default function InverterDetailsPage() {
                 </section>
 
                 <section className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-                  <div className="px-5 py-4 border-b border-slate-200 flex justify-between items-center">
-                    <h3 className="text-base font-bold text-slate-900">Detailed Readings</h3>
-                    <span className="text-xs text-slate-500">{generationData.length} entries</span>
+                  <div className="px-5 py-4 border-b border-slate-200 flex justify-between items-center gap-3 flex-wrap">
+                    <h3 className="text-base font-bold text-slate-900">
+                      Detailed Readings{" "}
+                      <span className="font-normal text-slate-400">
+                        · {{ "24h": "last 24 hours", week: "last week", month: "last month", all: "all history" }[readingsRange]}
+                      </span>
+                    </h3>
+                    <span className="text-xs text-slate-500 flex items-center gap-3">
+                      {isLoadingFullHistory && (
+                        <RefreshCw size={12} className="animate-spin text-slate-400" />
+                      )}
+                      {fullHistoryData.length.toLocaleString("en-IN")} entries
+                      <select
+                        value={readingsRange}
+                        onChange={(e) => {
+                          setReadingsRange(e.target.value);
+                          setVisibleCount(150);
+                        }}
+                        aria-label="Readings range"
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 hover:border-slate-300 focus:border-orange-500 focus:outline-none focus:ring-1 focus:ring-orange-500/20"
+                      >
+                        <option value="24h">Last 24 hours</option>
+                        <option value="week">Last week</option>
+                        <option value="month">Last month</option>
+                        <option value="all">All history</option>
+                      </select>
+                    </span>
                   </div>
-                  <div className="overflow-y-auto max-h-125">
+                  <div
+                    className="overflow-y-auto max-h-125"
+                    onScroll={(e) => {
+                      // Scroll-extend: append the next chunk of rows when the
+                      // user nears the bottom, keeping the DOM small for the
+                      // common "glance at recent readings" case.
+                      const el = e.currentTarget;
+                      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 600) {
+                        setVisibleCount((c) => (c < fullHistoryData.length ? c + 200 : c));
+                      }
+                    }}
+                  >
                     <table className="w-full text-sm">
                       <thead className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500 sticky top-0">
                         <tr>
@@ -943,7 +973,7 @@ export default function InverterDetailsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {generationData.map((item, index) => {
+                        {fullHistoryData.slice(0, visibleCount).map((item, index) => {
                           const ts = new Date(item.timestamp);
                           const now = new Date();
                           const isToday =
@@ -956,32 +986,28 @@ export default function InverterDetailsPage() {
                           // gap) would otherwise always read as "Live" under a freshness
                           // heuristic, silently hiding a real backlog flag. Matches the
                           // CSV export's logic below, which already does this correctly.
-                          const isBacklog = item.queued_offline;
-                          // Estimated takes priority over Backlog/Live — it's a different
-                          // kind of uncertainty (the TIME itself isn't real, not just old).
-                          const isEstimated = item.timestamp_is_estimated;
+                          // An estimated-timestamp row (device clock unsynced, stored under
+                          // arrival time — see timestamp_is_estimated) is shown as Backlog
+                          // too, same as a genuine queued_offline replay: both mean "don't
+                          // treat this as a fresh live reading."
+                          const isBacklog = item.queued_offline || item.timestamp_is_estimated;
                           return (
                           <tr
                             key={item.id || index}
                             className="border-b border-slate-100 hover:bg-slate-50"
                           >
-                            <td
-                              className={`px-5 py-2.5 text-center font-mono text-xs whitespace-nowrap ${isEstimated ? "text-purple-600" : "text-slate-700"}`}
-                              title={isEstimated ? "Device clock was not synced — this is arrival time, not the device's real reading time" : undefined}
-                            >
+                            <td className="px-5 py-2.5 text-center text-slate-700 font-mono text-xs whitespace-nowrap">
                               {/* Show the date whenever the reading isn't from today, so
                                   real past generation times can't be mistaken for "now". */}
-                              {isEstimated ? "~ " : ""}{format(ts, isToday ? "HH:mm:ss" : "dd MMM, HH:mm:ss")}
+                              {format(ts, isToday ? "HH:mm:ss" : "dd MMM, HH:mm:ss")}
                             </td>
                             <td className="px-5 py-2.5 text-center text-slate-700">{parseFloat(item.voltage).toFixed(1)}</td>
                             <td className="px-5 py-2.5 text-center text-slate-700">{parseFloat(item.current).toFixed(2)}</td>
                             <td className="px-5 py-2.5 text-center font-semibold text-orange-600">{parseFloat(item.power_out).toFixed(0)}</td>
                             <td className="px-5 py-2.5 text-center text-slate-700">{item.temperature ?? "—"}</td>
                             <td className="px-5 py-2.5 text-center">
-                              {isEstimated
-                                ? <span className="inline-block rounded-full bg-purple-50 px-2 py-0.5 text-[10px] font-semibold text-purple-700" title="Device clock not synced — time shown is estimated arrival time, not a real reading time">Estimated</span>
-                                : isBacklog
-                                ? <span className="inline-block rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700" title="Replayed from the device's offline buffer — the time shown is the real reading time, not now">Backlog</span>
+                              {isBacklog
+                                ? <span className="inline-block rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700" title="Replayed from the device's offline buffer">Backlog</span>
                                 : <span className="text-[10px] text-slate-400">Live</span>}
                             </td>
                           </tr>

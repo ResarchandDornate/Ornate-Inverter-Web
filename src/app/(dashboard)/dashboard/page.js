@@ -21,6 +21,8 @@ import {
   Cell,
   LineChart,
   Line,
+  ComposedChart,
+  Area,
   ReferenceDot,
 } from "recharts";
 import { getData } from "@/lib/api";
@@ -61,8 +63,10 @@ export default function DashboardPage() {
     queryKey: ["liveChartSeed"],
     queryFn: async () => {
       const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+      // Server-side window (timestamp__gte) + big page — one request with
+      // exactly the seed rows, instead of unsupported start/limit params.
       const res = await getData(
-        `/inverter/inverter-data/?start=${fiveMinAgo}&ordering=timestamp&limit=500`
+        `/inverter/inverter-data/?timestamp__gte=${encodeURIComponent(fiveMinAgo)}&ordering=timestamp&page_size=500`
       );
       return res?.results || [];
     },
@@ -182,8 +186,10 @@ export default function DashboardPage() {
   const { data: pgData, isLoading: pgLoading, error: pgError } = useQuery({
     queryKey: ["powerGenerationRange", range],
     queryFn: () =>
+      // page_size (honored server-side) replaces the ignored limit param —
+      // without it the 7d/30d charts silently truncated at 100 hourly rows.
       getData(
-        `/inverter/power-generation/?range=${pgRangeParam}&ordering=measurement_time&limit=5000`
+        `/inverter/power-generation/?range=${pgRangeParam}&ordering=measurement_time&page_size=5000`
       ),
     enabled: !!pgRangeParam,
     refetchInterval: 5 * 60 * 1000,
@@ -191,30 +197,18 @@ export default function DashboardPage() {
   });
 
   // Raw telemetry for the last hour — /power-generation/ only stores HOURLY
-  // aggregates, so we paginate through /inverter-data/?range=1d and filter
-  // client-side to the last 60 minutes, then bucket into 10-minute groups.
+  // aggregates, so the 1h view reads raw rows. The server filters the window
+  // (?timestamp__gte) and returns up to 5000 rows in ONE request — the old
+  // pattern crawled up to 12 sequential 100-row pages of the whole day every
+  // 60 s just to keep the last hour.
   const { data: oneHourData, isLoading: oneHourLoading, error: oneHourError } = useQuery({
     queryKey: ["dashboard1hRaw"],
     queryFn: async () => {
-      const allData = [];
-      const baseUrl = `/inverter/inverter-data/?range=1d&ordering=-timestamp`;
-      const MAX_PAGES = 12;
-      for (let page = 1; page <= MAX_PAGES; page++) {
-        const url = page === 1 ? baseUrl : `${baseUrl}&page=${page}`;
-        let response;
-        try {
-          response = await getData(url);
-        } catch {
-          break;
-        }
-        const results = response?.results || [];
-        if (results.length === 0) break;
-        allData.push(...results);
-        if (!response.next) break;
-      }
-      // Keep only the last 60 minutes for the 1h chart bucket grouping.
-      const oneHourAgo = Date.now() - 60 * 60 * 1000;
-      return allData.filter((r) => new Date(r.timestamp).getTime() >= oneHourAgo);
+      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const res = await getData(
+        `/inverter/inverter-data/?timestamp__gte=${encodeURIComponent(oneHourAgo)}&ordering=-timestamp&page_size=5000`
+      );
+      return res?.results || [];
     },
     enabled: range === "1h",
     refetchInterval: 60 * 1000,
@@ -484,12 +478,18 @@ export default function DashboardPage() {
                   {/* Scrollable plot — Y-axis hidden but space reserved */}
                   <div className="overflow-x-auto scrollbar-thin" style={{ height: 480 }}>
                     {chartType === "line" ? (
-                      <LineChart
+                      <ComposedChart
                         width={Math.max(800, historicalChart.length * 14)}
                         height={480}
                         data={historicalChart}
                         margin={{ top: 24, right: 20, left: 0, bottom: 0 }}
                       >
+                        <defs>
+                          <linearGradient id="dashLineShadow7d" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#60A5FA" stopOpacity={0.35} />
+                            <stop offset="100%" stopColor="#60A5FA" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
                         <XAxis
                           dataKey="label"
@@ -500,6 +500,15 @@ export default function DashboardPage() {
                         <Tooltip
                           formatter={(v) => [`${Number(v).toFixed(3)} kWh`, "Energy"]}
                           contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                        />
+                        <Area
+                          type="monotone"
+                          dataKey="energy"
+                          stroke="none"
+                          fill="url(#dashLineShadow7d)"
+                          isAnimationActive={false}
+                          legendType="none"
+                          tooltipType="none"
                         />
                         <Line
                           type="monotone"
@@ -532,7 +541,7 @@ export default function DashboardPage() {
                             strokeWidth={1.5}
                           />
                         )}
-                      </LineChart>
+                      </ComposedChart>
                     ) : (
                       <BarChart
                         width={Math.max(800, historicalChart.length * 14)}
@@ -563,7 +572,13 @@ export default function DashboardPage() {
               ) : chartType === "line" ? (
                 // Line view — same data, with highest / lowest markers.
                 <ResponsiveContainer>
-                  <LineChart data={historicalChart} margin={{ top: 24, right: 20, left: 0, bottom: 0 }}>
+                  <ComposedChart data={historicalChart} margin={{ top: 24, right: 20, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="dashLineShadow" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#60A5FA" stopOpacity={0.35} />
+                        <stop offset="100%" stopColor="#60A5FA" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
                     <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
                     <XAxis
                       dataKey="label"
@@ -591,6 +606,15 @@ export default function DashboardPage() {
                         range === "24h" ? `Hour: ${l}` : `Day: ${l}`
                       }
                       contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                    />
+                    <Area
+                      type="monotone"
+                      dataKey={chartValueKey}
+                      stroke="none"
+                      fill="url(#dashLineShadow)"
+                      isAnimationActive={false}
+                      legendType="none"
+                      tooltipType="none"
                     />
                     <Line
                       type="monotone"
@@ -623,7 +647,7 @@ export default function DashboardPage() {
                         strokeWidth={1.5}
                       />
                     )}
-                  </LineChart>
+                  </ComposedChart>
                 </ResponsiveContainer>
               ) : (
                 // 1h / 24h / 30d — fits within the card; no scroll needed.

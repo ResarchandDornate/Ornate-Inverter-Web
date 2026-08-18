@@ -8,11 +8,11 @@ const STATUS_MAP = {
   // Recovering: device reconnected and is replaying its offline backlog. Blue +
   // a pulsing dot to signal "catching up", distinct from steady-green live.
   recovering: { dot: "bg-blue-500",   text: "text-blue-700",   bg: "bg-blue-50",    label: "Recovering", pulse: true },
-  // Unsynced: the device IS pinging us right now, but its clock isn't synced
-  // so nothing it sends is being stored — distinct from both "Live" (data IS
-  // landing) and "Offline" (device isn't talking at all). Amber, pulsing to
-  // signal "something's actively wrong," not just "idle."
-  unsynced:   { dot: "bg-amber-500",  text: "text-amber-700",  bg: "bg-amber-50",   label: "Clock Unsynced", pulse: true },
+  // Unsynced: the device IS pinging us right now, but its clock isn't synced,
+  // so its readings are stored under arrival time (see timestamp_is_estimated)
+  // instead of a real reading time. Displayed identically to "recovering" —
+  // both mean "device reconnected, catching up, don't trust the timing yet."
+  unsynced:   { dot: "bg-blue-500",   text: "text-blue-700",   bg: "bg-blue-50",    label: "Recovering", pulse: true },
   offline:    { dot: "bg-red-500",    text: "text-red-700",    bg: "bg-red-50",     label: "Offline"    },
   idle:       { dot: "bg-amber-500",  text: "text-amber-700",  bg: "bg-amber-50",   label: "Idle"       },
   fault:      { dot: "bg-orange-500", text: "text-orange-700", bg: "bg-orange-50",  label: "Fault"      },

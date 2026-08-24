@@ -10,10 +10,16 @@ import {
   LogOut,
   AlertTriangle,
   Database,
-  LayoutGrid,
-  Map as MapIcon,
-  LineChart,
-  Bell,
+  BookOpen,
+  Globe,
+  Headphones,
+  Factory,
+  Wrench,
+  RotateCcw,
+  Package,
+  Puzzle,
+  ShieldCheck,
+  ClipboardList,
 } from "lucide-react";
 import { clearToken } from "@/lib/auth";
 import { showSuccess } from "@/lib/toast";
@@ -28,13 +34,19 @@ const NAV = [
 
 // Data Logger is a separate app ported in under /data-logger/*. It talks to its
 // OWN backend (NEXT_PUBLIC_DATALOGGER_API_URL), not the inverter API.
+// Primary nav mirrors the Suntrack Services portal's own sidebar structure.
 const DATA_LOGGER_NAV = [
-  { href: "/data-logger", label: "Site View", icon: LayoutDashboard },
-  { href: "/data-logger/assets", label: "Assets", icon: LayoutGrid },
-  { href: "/data-logger/map", label: "Map View", icon: MapIcon },
-  { href: "/data-logger/trends", label: "Trends", icon: LineChart },
-  { href: "/data-logger/alerts", label: "Alerts", icon: Bell },
-  { href: "/data-logger/settings", label: "Settings", icon: Settings },
+  { href: "/data-logger", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/data-logger/documentation", label: "Documentation", icon: BookOpen },
+  { href: "/data-logger/web-services", label: "Web Services", icon: Globe },
+  { href: "/data-logger/technical-support", label: "Technical Support", icon: Headphones },
+  { href: "/data-logger/new-plants", label: "New plants", icon: Factory },
+  { href: "/data-logger/on-site-support", label: "On-site support", icon: Wrench },
+  { href: "/data-logger/rma", label: "RMA", icon: RotateCcw },
+  { href: "/data-logger/inventory", label: "Inventory", icon: Package },
+  { href: "/data-logger/service", label: "Service", icon: Puzzle },
+  { href: "/data-logger/administration", label: "Administration", icon: ShieldCheck },
+  { href: "/data-logger/all-cases", label: "All Cases", icon: ClipboardList },
 ];
 
 export default function Sidebar() {
@@ -105,33 +117,11 @@ export default function Sidebar() {
       </div>
 
       {/* Nav — reflects the active workspace */}
-      <nav className="flex-1 px-3 py-4 overflow-y-auto">
+      <nav className="flex-1 px-3 py-4 overflow-y-auto scrollbar-thin">
         <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest px-3 mb-2">
           {inDataLogger ? "Data Logger" : "Workspace"}
         </p>
-        <ul className="space-y-1">
-          {nav.map((item) => {
-            const Icon = item.icon;
-            const active =
-              pathname === item.href ||
-              (item.href !== homeHref && pathname.startsWith(item.href));
-            return (
-              <li key={item.href}>
-                <Link
-                  href={item.href}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
-                    active
-                      ? "bg-orange-500/10 text-orange-400 border-l-2 border-orange-500"
-                      : "hover:bg-slate-800 hover:text-white"
-                  }`}
-                >
-                  <Icon size={18} />
-                  <span>{item.label}</span>
-                </Link>
-              </li>
-            );
-          })}
-        </ul>
+        <NavList items={nav} pathname={pathname} homeHref={homeHref} />
       </nav>
 
       {/* Footer */}
@@ -148,5 +138,33 @@ export default function Sidebar() {
         </p>
       </div>
     </aside>
+  );
+}
+
+function NavList({ items, pathname, homeHref }) {
+  return (
+    <ul className="space-y-1">
+      {items.map((item) => {
+        const Icon = item.icon;
+        const active =
+          pathname === item.href ||
+          (item.href !== homeHref && pathname.startsWith(item.href));
+        return (
+          <li key={item.href}>
+            <Link
+              href={item.href}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
+                active
+                  ? "bg-orange-500/10 text-orange-400 border-l-2 border-orange-500"
+                  : "hover:bg-slate-800 hover:text-white"
+              }`}
+            >
+              <Icon size={18} />
+              <span>{item.label}</span>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

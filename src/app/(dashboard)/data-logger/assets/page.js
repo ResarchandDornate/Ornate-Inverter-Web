@@ -1,6 +1,7 @@
 import { Search, ChevronDown, Filter } from 'lucide-react';
 import { getAssets, getFleetStats } from '@/lib/dataLoggerApi';
 import { AssetCard } from '@/components/data-logger/AssetCard';
+import Topbar from '@/components/Topbar';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,6 +9,8 @@ export default async function AssetsPage() {
   const [assets, s] = await Promise.all([getAssets(), getFleetStats()]);
 
   return (
+    <>
+    <Topbar title="Assets" breadcrumbs={['Data Logger', 'Assets']} />
     <div className="mx-auto max-w-350 px-4 py-5 sm:px-6">
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2">
@@ -55,6 +58,7 @@ export default async function AssetsPage() {
         )}
       </div>
     </div>
+    </>
   );
 }
 

@@ -997,9 +997,11 @@ export default function InverterDetailsPage() {
                             className="border-b border-slate-100 hover:bg-slate-50"
                           >
                             <td className="px-5 py-2.5 text-center text-slate-700 font-mono text-xs whitespace-nowrap">
-                              {/* Show the date whenever the reading isn't from today, so
-                                  real past generation times can't be mistaken for "now". */}
-                              {format(ts, isToday ? "HH:mm:ss" : "dd MMM, HH:mm:ss")}
+                              {/* Show the date (with year) whenever the reading isn't from
+                                  today, so real past generation times can't be mistaken for
+                                  "now" — and so a reading from a prior year is unambiguous
+                                  once "all history" spans more than one year. */}
+                              {format(ts, isToday ? "HH:mm:ss" : "dd MMM yyyy, HH:mm:ss")}
                             </td>
                             <td className="px-5 py-2.5 text-center text-slate-700">{parseFloat(item.voltage).toFixed(1)}</td>
                             <td className="px-5 py-2.5 text-center text-slate-700">{parseFloat(item.current).toFixed(2)}</td>

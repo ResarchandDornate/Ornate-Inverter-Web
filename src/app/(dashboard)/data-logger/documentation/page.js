@@ -1,12 +1,10 @@
-import { BookOpen } from 'lucide-react';
-import { ComingSoon } from '@/components/data-logger/ComingSoon';
+import { DocumentationCenter } from '@/components/data-logger/DocumentationCenter';
+
+// This is intentionally presentation-only. Replace this preview role with the
+// authenticated role supplied by the backend/auth context once it is available.
+// The API must still enforce upload, edit, and delete permissions server-side.
+const PREVIEW_ROLE = 'admin';
 
 export default function DocumentationPage() {
-  return (
-    <ComingSoon
-      icon={BookOpen}
-      title="Documentation"
-      note="Guides, API references and datasheets for your Data Logger installations will appear here."
-    />
-  );
+  return <DocumentationCenter role={PREVIEW_ROLE} />;
 }

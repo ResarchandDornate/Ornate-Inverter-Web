@@ -31,22 +31,62 @@ export const EMPTY_FLEET = {
   devices: 0, online: 0, offline: 0,
 };
 
+// Solar-shaped 24h curve (0 overnight, peaking near noon) for the demo asset's chart.
+const DEMO_HOURLY = Array.from({ length: 24 }, (_, h) => ({
+  time: `${String(h).padStart(2, "0")}:00`,
+  value: Math.round(7800 * Math.max(0, Math.sin(((h - 6) / 12) * Math.PI))),
+}));
+
+// Local dev-only sample asset so the UI (asset list, detail view, map) has
+// something to render before the real Data Logger backend is wired up.
+// Never used in production — see isDev guards below.
+const DEMO_ASSET = {
+  id: "demo-fronius-okhla",
+  name: "Fronius Inverter — Okhla",
+  make: "Fronius",
+  model: "Fronius Symo 10.0-3-M",
+  serial: "FR2026-118824",
+  status: "running",
+  health: "ok",
+  location: {
+    lat: 28.535,
+    lng: 77.2807,
+    label: "Ornate Solar, A-87, Okhla Phase-2, New Delhi, 110020",
+  },
+  energy: { today: 42.6, todayDelta: 3.8, month: 986.4, year: 8420.7 },
+  kw: 7.8,
+  ampere: 14.2,
+  voltage: 415,
+  parameters: [
+    { label: "AC Power", value: 7800, unit: "W" },
+    { label: "DC Voltage", value: 620, unit: "V" },
+    { label: "AC Voltage", value: 415, unit: "V" },
+    { label: "Frequency", value: 50.0, unit: "Hz" },
+    { label: "Temperature", value: 38.5, unit: "°C" },
+  ],
+  hourly: DEMO_HOURLY,
+};
+
+const DEMO_FLEET = { totalAssets: 1, running: 1, stopped: 0, disconnected: 0, devices: 1, online: 1, offline: 0 };
+
+const isDev = process.env.NODE_ENV !== "production";
+
 export function getSiteSummary() {
   return get("/api/site/summary", EMPTY_SUMMARY);
 }
 
 export function getFleetStats() {
-  return get("/api/fleet/stats", EMPTY_FLEET);
+  return get("/api/fleet/stats", isDev ? DEMO_FLEET : EMPTY_FLEET);
 }
 
 export function getAssets() {
-  return get("/api/assets", []);
+  return get("/api/assets", isDev ? [DEMO_ASSET] : []);
 }
 
 export function getMapAssets() {
-  return get("/api/map/assets", []);
+  return get("/api/map/assets", isDev ? [DEMO_ASSET] : []);
 }
 
 export function getAsset(id) {
-  return get(`/api/assets/${encodeURIComponent(id)}`, null);
+  return get(`/api/assets/${encodeURIComponent(id)}`, isDev && id === DEMO_ASSET.id ? DEMO_ASSET : null);
 }

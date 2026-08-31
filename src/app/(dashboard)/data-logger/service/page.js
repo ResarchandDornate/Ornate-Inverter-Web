@@ -1,12 +1,5 @@
-import { Puzzle } from 'lucide-react';
-import { ComingSoon } from '@/components/data-logger/ComingSoon';
+import { SparePartsRequests } from '@/components/data-logger/SparePartsRequests';
 
 export default function ServicePage() {
-  return (
-    <ComingSoon
-      icon={Puzzle}
-      title="Service"
-      note="Service requests and spare parts stock and order requests will appear here."
-    />
-  );
+  return <SparePartsRequests />;
 }

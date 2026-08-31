@@ -17,43 +17,62 @@ export function FreeMap({ assets, selectedId, onSelect, defaultCenter = [12.808,
   const mapRef = useRef(null);
   const leafletRef = useRef(null);
   const markersRef = useRef(new Map());
+  const terminatorRef = useRef(null);
 
   // Init map + markers once.
   useEffect(() => {
     let cancelled = false;
+    let terminatorTimer = null;
 
-    import('leaflet').then((mod) => {
-      const L = mod.default ?? mod;
-      if (cancelled || !ref.current || mapRef.current) return;
-      leafletRef.current = L;
+    Promise.all([import('leaflet'), import('@joergdietrich/leaflet.terminator')]).then(
+      ([mod, terminatorMod]) => {
+        const L = mod.default ?? mod;
+        const terminator = terminatorMod.default ?? terminatorMod;
+        if (cancelled || !ref.current || mapRef.current) return;
+        leafletRef.current = L;
 
-      const map = L.map(ref.current, { attributionControl: true }).setView(defaultCenter, defaultZoom);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-      }).addTo(map);
-      mapRef.current = map;
-
-      const bounds = [];
-      assets.forEach((a) => {
-        const pos = [a.location.lat, a.location.lng];
-        const marker = L.circleMarker(pos, {
-          radius: a.id === selectedId ? 11 : 8,
-          fillColor: MARKER_COLOR[a.status] ?? '#94a3b8',
-          fillOpacity: 1,
-          color: a.id === selectedId ? '#2f6fed' : '#ffffff',
-          weight: a.id === selectedId ? 3 : 2,
+        // No on-screen +/- buttons — zoom is manual only (scroll wheel /
+        // pinch / double-click), all enabled by default.
+        const map = L.map(ref.current, { attributionControl: true, zoomControl: false }).setView(
+          defaultCenter,
+          defaultZoom
+        );
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
         }).addTo(map);
-        marker.bindTooltip(a.name, { direction: 'top' });
-        marker.on('click', () => onSelect(a.id));
-        markersRef.current.set(a.id, marker);
-        bounds.push(pos);
-      });
-      if (bounds.length) map.fitBounds(bounds, { padding: [40, 40] });
-    });
+        mapRef.current = map;
+
+        // Day/night terminator — shades the half of the world currently in
+        // darkness, computed from real sun position (not local timezones, so
+        // it's correct regardless of where the viewer is). Refreshes every
+        // minute to track the Earth's rotation.
+        const sunlight = terminator({ fillOpacity: 0.25 }).addTo(map);
+        terminatorRef.current = sunlight;
+        terminatorTimer = setInterval(() => sunlight.setTime(), 60 * 1000);
+
+        const bounds = [];
+        assets.forEach((a) => {
+          const pos = [a.location.lat, a.location.lng];
+          const marker = L.circleMarker(pos, {
+            radius: a.id === selectedId ? 11 : 8,
+            fillColor: MARKER_COLOR[a.status] ?? '#94a3b8',
+            fillOpacity: 1,
+            color: a.id === selectedId ? '#2f6fed' : '#ffffff',
+            weight: a.id === selectedId ? 3 : 2,
+          }).addTo(map);
+          marker.bindTooltip(a.name, { direction: 'top' });
+          marker.on('click', () => onSelect(a.id));
+          markersRef.current.set(a.id, marker);
+          bounds.push(pos);
+        });
+        if (bounds.length) map.fitBounds(bounds, { padding: [40, 40] });
+      }
+    );
 
     return () => {
       cancelled = true;
+      if (terminatorTimer) clearInterval(terminatorTimer);
       markersRef.current.clear();
       if (mapRef.current) {
         mapRef.current.remove();

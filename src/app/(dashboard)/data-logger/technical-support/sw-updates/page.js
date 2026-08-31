@@ -3,14 +3,14 @@ import { CaseTracker } from '@/components/data-logger/CaseTracker';
 
 export const dynamic = 'force-dynamic';
 
-export default async function AllCasesPage() {
+export default async function SwUpdatesPage() {
   const assets = await getAssets();
   const installations = assets.map((asset) => ({ id: asset.id, name: asset.name }));
   return (
     <CaseTracker
-      title="All Cases"
-      breadcrumbs={['All Cases']}
-      identifierPrefix="CAS"
+      title="Sw Updates"
+      breadcrumbs={['Technical Support', 'Sw Updates']}
+      identifierPrefix="SWU"
       showContactSubjectColumns
       installations={installations}
     />

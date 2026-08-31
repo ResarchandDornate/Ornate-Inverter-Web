@@ -12,7 +12,7 @@ const MARKER_COLOR = {
   disconnected: '#94a3b8',
 };
 
-export function FreeMap({ assets, selectedId, onSelect }) {
+export function FreeMap({ assets, selectedId, onSelect, defaultCenter = [12.808, 77.69], defaultZoom = 12 }) {
   const ref = useRef(null);
   const mapRef = useRef(null);
   const leafletRef = useRef(null);
@@ -27,7 +27,7 @@ export function FreeMap({ assets, selectedId, onSelect }) {
       if (cancelled || !ref.current || mapRef.current) return;
       leafletRef.current = L;
 
-      const map = L.map(ref.current, { attributionControl: true }).setView([12.808, 77.69], 12);
+      const map = L.map(ref.current, { attributionControl: true }).setView(defaultCenter, defaultZoom);
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         maxZoom: 19,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',

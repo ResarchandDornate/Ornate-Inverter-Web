@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import {
@@ -15,11 +16,14 @@ import {
   Headphones,
   Factory,
   Wrench,
-  RotateCcw,
   Package,
   Puzzle,
   ShieldCheck,
   ClipboardList,
+  Activity,
+  ChevronDown,
+  FileText,
+  Upload,
 } from "lucide-react";
 import { clearToken } from "@/lib/auth";
 import { showSuccess } from "@/lib/toast";
@@ -38,11 +42,25 @@ const NAV = [
 const DATA_LOGGER_NAV = [
   { href: "/data-logger", label: "Dashboard", icon: LayoutDashboard },
   { href: "/data-logger/documentation", label: "Documentation", icon: BookOpen },
-  { href: "/data-logger/web-services", label: "Web Services", icon: Globe },
-  { href: "/data-logger/technical-support", label: "Technical Support", icon: Headphones },
+  {
+    href: "/data-logger/web-services",
+    label: "Web Services",
+    icon: Globe,
+    children: [
+      { href: "/data-logger/web-services/monitoring", label: "Monitoring", icon: Activity },
+    ],
+  },
+  {
+    href: "/data-logger/technical-support",
+    label: "Technical Support",
+    icon: Headphones,
+    children: [
+      { href: "/data-logger/technical-support/technical-guide", label: "Technical Guide", icon: FileText },
+      { href: "/data-logger/technical-support/software-update", label: "Software Update", icon: Upload },
+    ],
+  },
   { href: "/data-logger/new-plants", label: "New plants", icon: Factory },
   { href: "/data-logger/on-site-support", label: "On-site support", icon: Wrench },
-  { href: "/data-logger/rma", label: "RMA", icon: RotateCcw },
   { href: "/data-logger/inventory", label: "Inventory", icon: Package },
   { href: "/data-logger/service", label: "Service", icon: Puzzle },
   { href: "/data-logger/administration", label: "Administration", icon: ShieldCheck },
@@ -142,6 +160,8 @@ export default function Sidebar() {
 }
 
 function NavList({ items, pathname, homeHref }) {
+  const [expanded, setExpanded] = useState([]);
+
   return (
     <ul className="space-y-1">
       {items.map((item) => {
@@ -149,19 +169,66 @@ function NavList({ items, pathname, homeHref }) {
         const active =
           pathname === item.href ||
           (item.href !== homeHref && pathname.startsWith(item.href));
+        const hasChildren = item.children?.length > 0;
+        const childIsActive = hasChildren && item.children.some(
+          (child) => pathname === child.href || pathname.startsWith(`${child.href}/`)
+        );
+        // A direct visit to a child route opens its parent. The user can still
+        // collapse that parent manually while staying on the child page.
+        const isExpanded = childIsActive ? !expanded.includes(item.href) : expanded.includes(item.href);
         return (
           <li key={item.href}>
-            <Link
-              href={item.href}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
-                active
-                  ? "bg-orange-500/10 text-orange-400 border-l-2 border-orange-500"
-                  : "hover:bg-slate-800 hover:text-white"
-              }`}
-            >
-              <Icon size={18} />
-              <span>{item.label}</span>
-            </Link>
+            {hasChildren ? (
+              <button
+                type="button"
+                onClick={() => setExpanded((current) => current.includes(item.href) ? current.filter((href) => href !== item.href) : [...current, item.href])}
+                aria-expanded={isExpanded}
+                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm font-medium transition ${
+                  active
+                    ? "bg-orange-500/10 text-orange-400 border-l-2 border-orange-500"
+                    : "hover:bg-slate-800 hover:text-white"
+                }`}
+              >
+                <Icon size={18} />
+                <span>{item.label}</span>
+                <ChevronDown size={15} className={`ml-auto transition-transform ${isExpanded ? "rotate-180" : ""}`} />
+              </button>
+            ) : (
+              <Link
+                href={item.href}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition ${
+                  active
+                    ? "bg-orange-500/10 text-orange-400 border-l-2 border-orange-500"
+                    : "hover:bg-slate-800 hover:text-white"
+                }`}
+              >
+                <Icon size={18} />
+                <span>{item.label}</span>
+              </Link>
+            )}
+            {hasChildren && isExpanded && (
+              <ul className="mt-1 space-y-1 border-l border-slate-700/70 pl-3 ml-5">
+                {item.children.map((child) => {
+                  const ChildIcon = child.icon;
+                  const childActive = pathname === child.href || pathname.startsWith(`${child.href}/`);
+                  return (
+                    <li key={child.href}>
+                      <Link
+                        href={child.href}
+                        className={`flex items-center gap-2 rounded-md px-2 py-2 text-xs font-medium transition ${
+                          childActive
+                            ? "bg-orange-500/10 text-orange-400"
+                            : "text-slate-400 hover:bg-slate-800 hover:text-white"
+                        }`}
+                      >
+                        <ChildIcon size={14} />
+                        <span>{child.label}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </li>
         );
       })}

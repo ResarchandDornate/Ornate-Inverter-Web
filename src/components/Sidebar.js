@@ -22,8 +22,12 @@ import {
   ClipboardList,
   Activity,
   ChevronDown,
-  FileText,
   Upload,
+  LayoutGrid,
+  Cpu,
+  LifeBuoy,
+  FilePlus,
+  Rocket,
 } from "lucide-react";
 import { clearToken } from "@/lib/auth";
 import { showSuccess } from "@/lib/toast";
@@ -55,13 +59,29 @@ const DATA_LOGGER_NAV = [
     label: "Technical Support",
     icon: Headphones,
     children: [
-      { href: "/data-logger/technical-support/technical-guide", label: "Technical Guide", icon: FileText },
-      { href: "/data-logger/technical-support/software-update", label: "Software Update", icon: Upload },
+      { href: "/data-logger/technical-support/remote-technical-support", label: "Remote Technical Support", icon: LifeBuoy },
+      { href: "/data-logger/technical-support/sw-updates", label: "Sw Updates", icon: Upload },
     ],
   },
-  { href: "/data-logger/new-plants", label: "New plants", icon: Factory },
+  {
+    href: "/data-logger/new-plants",
+    label: "New plants",
+    icon: Factory,
+    children: [
+      { href: "/data-logger/new-plants/registration", label: "Registration", icon: FilePlus },
+      { href: "/data-logger/new-plants/commissioning", label: "Commissioning", icon: Rocket },
+    ],
+  },
   { href: "/data-logger/on-site-support", label: "On-site support", icon: Wrench },
-  { href: "/data-logger/inventory", label: "Inventory", icon: Package },
+  {
+    href: "/data-logger/inventory",
+    label: "Inventory",
+    icon: Package,
+    children: [
+      { href: "/data-logger/inventory/plants", label: "Plants", icon: LayoutGrid },
+      { href: "/data-logger/inventory/device-list", label: "Device List", icon: Cpu },
+    ],
+  },
   { href: "/data-logger/service", label: "Service", icon: Puzzle },
   { href: "/data-logger/administration", label: "Administration", icon: ShieldCheck },
   { href: "/data-logger/all-cases", label: "All Cases", icon: ClipboardList },

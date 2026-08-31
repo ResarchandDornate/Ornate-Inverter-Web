@@ -48,6 +48,7 @@ const DEMO_ASSET = {
   serial: "FR2026-118824",
   status: "running",
   health: "ok",
+  country: "India",
   location: {
     lat: 28.535,
     lng: 77.2807,
@@ -69,6 +70,82 @@ const DEMO_ASSET = {
 
 const DEMO_FLEET = { totalAssets: 1, running: 1, stopped: 0, disconnected: 0, devices: 1, online: 1, offline: 0 };
 
+// Local dev-only sample plant for the Inventory > Plants list/detail pages —
+// same convention as DEMO_ASSET above (never used in production).
+const DEMO_PLANT = {
+  id: "demo-plant-okhla",
+  date: "31 Aug 2026",
+  name: "Ornate Solar — Okhla Installation",
+  statusDot: "good",
+  country: "India",
+  company: "Ornate Solar Pvt Ltd",
+  tracker: "Ornate Solar",
+  series: "Suntrack 2020",
+  devices: { ncu: 1, rsu: 0, tcu: 1, tmu: 0, tcuBreakdown: [{ model: "TCU 2020", count: 1 }] },
+  rma: 0,
+  cases: 0,
+  location: {
+    lat: 28.535,
+    lng: 77.2807,
+    label: "Ornate Solar, A-87, Okhla Phase-2, New Delhi, 110020",
+  },
+  basicInfo: {
+    location: "Okhla, New Delhi",
+    country: "India",
+    status: "Active",
+    serviceCenter: "Based on area of influence",
+    totalPlantPower: "7.8 kW",
+    advancedServices: "None",
+  },
+  contactInfo: {
+    company: "Ornate Solar Pvt Ltd",
+    tracker: "Ornate Solar",
+    contactPerson: "Site Manager",
+    scadaCompany: "—",
+    promotorName: "—",
+    finalCustomerName: "—",
+  },
+  history: {
+    createdAt: "31 Aug 2026, 00:00",
+    updatedAt: "31 Aug 2026, 00:00",
+    lastTransmission: "31 Aug 2026, 00:00",
+  },
+  windThresholds: { alertLevel: "", criticalLevel: "" },
+};
+
+// Local dev-only sample inventory devices for Inventory > Device List —
+// two units matching DEMO_PLANT's device counts (1 NCU, 1 TCU).
+const DEMO_DEVICES = [
+  {
+    id: "dev-ncu-001",
+    company: "Ornate Solar Pvt Ltd",
+    installationId: DEMO_PLANT.id,
+    installation: DEMO_PLANT.name,
+    country: "India",
+    deviceType: "NCU",
+    product: "NCU 2024",
+    status: "Installed",
+    itemInfo: "NCU 2024 · Rev C",
+    tags: ["okhla", "delhi"],
+    barcode: "NCU-2024-000112",
+    warranty: { battery: "Valid", pcb: "Valid" },
+  },
+  {
+    id: "dev-tcu-2020-001",
+    company: "Ornate Solar Pvt Ltd",
+    installationId: DEMO_PLANT.id,
+    installation: DEMO_PLANT.name,
+    country: "India",
+    deviceType: "TCU",
+    product: "TCU 2020",
+    status: "Installed",
+    itemInfo: "TCU 2020 · Rev B",
+    tags: ["okhla", "tracker"],
+    barcode: "TCU-2020-004458",
+    warranty: { battery: "Expired", pcb: "Valid" },
+  },
+];
+
 const isDev = process.env.NODE_ENV !== "production";
 
 export function getSiteSummary() {
@@ -89,4 +166,16 @@ export function getMapAssets() {
 
 export function getAsset(id) {
   return get(`/api/assets/${encodeURIComponent(id)}`, isDev && id === DEMO_ASSET.id ? DEMO_ASSET : null);
+}
+
+export function getPlants() {
+  return get("/api/plants", isDev ? [DEMO_PLANT] : []);
+}
+
+export function getPlant(id) {
+  return get(`/api/plants/${encodeURIComponent(id)}`, isDev && id === DEMO_PLANT.id ? DEMO_PLANT : null);
+}
+
+export function getInventoryDevices() {
+  return get("/api/inventory/devices", isDev ? DEMO_DEVICES : []);
 }

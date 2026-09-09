@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { isAuthenticated } from "@/lib/auth";
+import { isAuthenticated, isCustomer } from "@/lib/auth";
 import Sidebar from "@/components/Sidebar";
 import Chatbot from "@/components/Chatbot";
 
@@ -14,6 +14,11 @@ export default function DashboardGroupLayout({ children }) {
   useEffect(() => {
     if (!isAuthenticated()) {
       router.replace("/login");
+    } else if (isCustomer()) {
+      // Customers have no business on the fleet console — send them to their
+      // own system. This is a UX guard, not a security boundary: the API is
+      // what has to stop a customer's token from reading the whole fleet.
+      router.replace("/my-system");
     } else {
       setAuthChecked(true);
     }

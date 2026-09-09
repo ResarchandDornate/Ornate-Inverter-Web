@@ -3,24 +3,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import {
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+import { TrendChart } from "@/components/charts/TrendChart";
 import { Zap, Activity, TrendingUp, Calendar, BatteryCharging, Thermometer } from "lucide-react";
 import { getData } from "@/lib/api";
 import Topbar from "@/components/Topbar";
 import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
 import { useChartType } from "@/hooks/useChartType";
-import { useLiveInverters } from "@/hooks/useLiveInverters";
+import { useScopedInverters } from "@/hooks/useScopedInverters";
 import { computeStatus, formatLastSeen, isLive } from "@/lib/inverterStatus";
 
 export default function AnalyticsPage() {
@@ -31,7 +21,7 @@ export default function AnalyticsPage() {
   const isToday = date === todayStr;
   const [chartType] = useChartType(); // global "bar" | "line" from Settings
 
-  const { data: inverters = [], dataUpdatedAt } = useLiveInverters();
+  const { data: inverters = [], dataUpdatedAt } = useScopedInverters();
 
   // Rolling live chart — accumulate one point every time useLiveInverters polls (every 15 s).
   const MAX_LIVE_SAMPLES = 60; // 15 min window at 15 s interval
@@ -204,64 +194,31 @@ export default function AnalyticsPage() {
                 </div>
               </div>
             </div>
-            <div style={{ width: "100%", height: 280 }}>
-              {liveSeries.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-sm text-slate-400">
-                  Waiting for first sample…
-                </div>
-              ) : chartType === "line" ? (
-                <ResponsiveContainer>
-                  <LineChart data={liveSeries} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                    <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={30} />
-                    <YAxis tick={{ fontSize: 10, fill: "#6B7280" }} unit=" W" domain={[0, "auto"]} width={65} />
-                    <Tooltip
-                      formatter={(v) => [`${Number(v).toFixed(0)} W`, "Total Power"]}
-                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                    />
-                    <Line
-                      type="monotone"
-                      connectNulls
-                      dataKey="power"
-                      name="Power (W)"
-                      stroke="#5B6BB5"
-                      strokeWidth={2}
-                      dot={{ r: 2, fill: "#5B6BB5", strokeWidth: 0 }}
-                      activeDot={{ r: 5 }}
-                      isAnimationActive={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <ResponsiveContainer>
-                  <BarChart data={liveSeries} margin={{ top: 10, right: 16, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                    <XAxis
-                      dataKey="time"
-                      tick={{ fontSize: 10, fill: "#6B7280" }}
-                      minTickGap={30}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 10, fill: "#6B7280" }}
-                      unit=" W"
-                      domain={[0, "auto"]}
-                      width={65}
-                    />
-                    <Tooltip
-                      formatter={(v) => [`${Number(v).toFixed(0)} W`, "Total Power"]}
-                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                    />
-                    <Bar
-                      dataKey="power"
-                      name="Power (W)"
-                      fill="#E97451"
-                      radius={[3, 3, 0, 0]}
-                      maxBarSize={20}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
+            {liveSeries.length === 0 ? (
+              <div
+                className="flex items-center justify-center text-sm text-slate-400"
+                style={{ height: 280 }}
+              >
+                Waiting for first sample…
+              </div>
+            ) : (
+              <TrendChart
+                data={liveSeries}
+                xKey="time"
+                height={280}
+                unitLeft="W"
+                series={[
+                  {
+                    key: "power",
+                    name: "Total Power",
+                    type: chartType === "line" ? "area" : "bar",
+                    unit: "W",
+                    decimals: 0,
+                    maxBarSize: 20,
+                  },
+                ]}
+              />
+            )}
           </section>
         )}
 
@@ -287,51 +244,23 @@ export default function AnalyticsPage() {
               No energy data for this date yet.
             </div>
           ) : (
-            <div style={{ width: "100%", height: 300 }}>
-              {chartType === "line" ? (
-                <ResponsiveContainer>
-                  <LineChart data={hourlyChart} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                    <XAxis dataKey="hour" tick={{ fontSize: 11, fill: "#6B7280" }} />
-                    <YAxis tick={{ fontSize: 11, fill: "#6B7280" }} unit=" kWh" width={70} />
-                    <Tooltip
-                      formatter={(v, name) => {
-                        if (name === "energy") return [`${Number(v).toFixed(3)} kWh`, "Energy"];
-                        return [`${Number(v).toFixed(0)} W`, "Avg Power"];
-                      }}
-                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                    />
-                    <Line
-                      type="monotone"
-                      connectNulls
-                      dataKey="energy"
-                      name="energy"
-                      stroke="#5B6BB5"
-                      strokeWidth={2}
-                      dot={{ r: 3, fill: "#5B6BB5", strokeWidth: 0 }}
-                      activeDot={{ r: 5 }}
-                      isAnimationActive={false}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <ResponsiveContainer>
-                  <BarChart data={hourlyChart} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                    <XAxis dataKey="hour" tick={{ fontSize: 11, fill: "#6B7280" }} />
-                    <YAxis tick={{ fontSize: 11, fill: "#6B7280" }} unit=" kWh" width={70} />
-                    <Tooltip
-                      formatter={(v, name) => {
-                        if (name === "energy") return [`${Number(v).toFixed(3)} kWh`, "Energy"];
-                        return [`${Number(v).toFixed(0)} W`, "Avg Power"];
-                      }}
-                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                    />
-                    <Bar dataKey="energy" fill="#E97451" radius={[4, 4, 0, 0]} maxBarSize={42} />
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
+            <TrendChart
+              data={hourlyChart}
+              xKey="hour"
+              height={300}
+              unitLeft="kWh"
+              brush={hourlyChart.length > 40}
+              series={[
+                {
+                  key: "energy",
+                  name: "Energy",
+                  type: chartType === "line" ? "area" : "bar",
+                  unit: "kWh",
+                  decimals: 3,
+                  maxBarSize: 42,
+                },
+              ]}
+            />
           )}
         </section>
 

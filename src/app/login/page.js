@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mail, Lock, Eye, EyeOff, Loader2 } from "lucide-react";
 import { postData } from "@/lib/api";
-import { setToken } from "@/lib/auth";
+import { setToken, setProfile, extractProfile, homeRouteForRole } from "@/lib/auth";
 import { showSuccess, showError, extractApiMessage } from "@/lib/toast";
 
 export default function LoginPage() {
@@ -45,8 +45,15 @@ export default function LoginPage() {
       }
 
       setToken(token);
+
+      // Ornate staff land on the fleet console; a customer who bought a system
+      // lands on their own. If the backend sends no role we assume staff, so a
+      // missing field never locks an operator out of the portal.
+      const profile = extractProfile(res);
+      setProfile(profile);
+
       showSuccess("Welcome back!");
-      router.replace("/dashboard");
+      router.replace(homeRouteForRole(profile.role));
     } catch (err) {
       showError(extractApiMessage(err, "Login failed. Please try again."));
     } finally {

@@ -8,6 +8,7 @@ import { AlertTriangle, ShieldAlert, ShieldCheck, RefreshCw, Cpu, Clock } from "
 import Topbar from "@/components/Topbar";
 import StatusBadge from "@/components/StatusBadge";
 import { getData } from "@/lib/api";
+import { useScopedInverters } from "@/hooks/useScopedInverters";
 
 // Fault value as the firmware's canonical 0x-prefixed uppercase hex.
 function faultHex(row) {
@@ -35,8 +36,19 @@ export default function FaultsPage() {
     refetchOnMount: true,
   });
 
-  const live = data?.live || [];
-  const history = data?.history || [];
+  // The faults endpoint always returns the whole fleet, so the site scope is
+  // applied here by inverter id — the same id the rows already carry for their
+  // detail links.
+  const { data: scopedInverters = [], site } = useScopedInverters();
+  const scopedIds = useMemo(
+    () => new Set(scopedInverters.map((i) => String(i.id))),
+    [scopedInverters]
+  );
+  const inScope = (rows) =>
+    site ? rows.filter((r) => scopedIds.has(String(r.inverter_id))) : rows;
+
+  const live = inScope(data?.live || []);
+  const history = inScope(data?.history || []);
 
   // Inverter dropdown built from whatever appears in the fault log.
   const inverterOptions = useMemo(() => {

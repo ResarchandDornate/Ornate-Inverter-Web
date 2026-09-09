@@ -4,17 +4,7 @@ import { useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { format } from "date-fns";
-import {
-  BarChart,
-  Bar,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from "recharts";
+import { TrendChart } from "@/components/charts/TrendChart";
 import {
   Zap,
   Activity,
@@ -28,15 +18,18 @@ import {
   ShieldAlert,
   RefreshCw,
   Download,
+  MapPin,
 } from "lucide-react";
 import { getData } from "@/lib/api";
 import { QUERY_KEYS } from "@/lib/queryKeys";
 import Topbar from "@/components/Topbar";
 import StatusBadge from "@/components/StatusBadge";
 import StatusCard from "@/components/StatusCard";
+import { useLiveInverters } from "@/hooks/useLiveInverters";
 import {
   computeStatus,
   formatLastSeen,
+  formatLocation,
   parseFaultBitmask,
   hasActiveFault,
 } from "@/lib/inverterStatus";
@@ -48,14 +41,61 @@ const TABS = [
   { id: "faults", label: "Faults" },
 ];
 
+// Two independent flags per range:
+//
+//   feed   — where the CHART's points come from.
+//            "recent" = the 100-row live poll (enough for 10 min / 1 hour)
+//            "window" = a paged raw-telemetry fetch over the whole window
+//   source — where the Total Generation CARD gets its kWh. "pg" keeps reading
+//            the backend's pre-aggregated energy, which is authoritative;
+//            raw telemetry carries power only, so it can be integrated but not
+//            trusted the same way.
+//
+// Every range now feeds the chart from raw readings, so the points BETWEEN each
+// hour or day are on screen instead of a single averaged bucket. One inverter's
+// week is ~2k rows, which is why this page can load the lot up front while the
+// fleet-wide dashboard has to drill in on demand.
 const CHART_RANGES = [
-  { id: "10m",    label: "Last 10 min",   source: "raw", windowMin: 10, bucketSec: 0 },
-  { id: "1h",     label: "Last 1 hour",   source: "raw", windowMin: 60, bucketSec: 60 },
-  { id: "1d",     label: "Last 24 hours", source: "pg",  windowHr: 24,  bucketKind: "hour" },
-  { id: "1w",     label: "Last week",     source: "pg",  windowDay: 7,  bucketKind: "day"  },
-  { id: "1mo",    label: "Last month",    source: "pg",  windowDay: 30, bucketKind: "day"  },
-  { id: "custom", label: "Custom date",   source: "pg",                 bucketKind: "hour" },
+  { id: "10m",    label: "Last 10 min",   source: "raw", feed: "recent", windowMin: 10,           bucketSec: 0,  axisFmt: "HH:mm:ss" },
+  { id: "1h",     label: "Last 1 hour",   source: "raw", feed: "recent", windowMin: 60,           bucketSec: 60, axisFmt: "HH:mm" },
+  { id: "1d",     label: "Last 24 hours", source: "pg",  feed: "window", windowMin: 60 * 24,      slotSec: 60,      axisFmt: "HH:mm" },
+  { id: "1w",     label: "Last week",     source: "pg",  feed: "window", windowMin: 60 * 24 * 7,  slotSec: 600,     axisFmt: "dd MMM HH:mm" },
+  { id: "1mo",    label: "Last month",    source: "pg",  feed: "window", windowMin: 60 * 24 * 30, slotSec: 1800,    axisFmt: "dd MMM HH:mm" },
+  { id: "custom", label: "Custom date",   source: "pg",  feed: "window", customDay: true,         slotSec: 60,      axisFmt: "HH:mm" },
 ];
+
+/**
+ * Lay readings onto a continuous grid of fixed slots across [start, end].
+ *
+ * The grid is what keeps the time axis honest. Plotting the readings alone on a
+ * categorical axis would collapse every gap — an inverter offline all night
+ * would render as one continuous daylight curve, because the missing hours
+ * simply would not be there. Every slot is emitted; ones with no reading come
+ * back null, which the chart draws as a break rather than a fabricated zero.
+ *
+ * Slot widths are sized so a window lands near ~1,000-1,500 points: fine enough
+ * that 24 hours keeps each per-minute reading, coarse enough that a month does
+ * not ask the browser to draw tens of thousands of them.
+ */
+function toSlotSeries(points, slotMs, start, end) {
+  const buckets = new Map();
+  points.forEach(({ t, power }) => {
+    const key = Math.floor(t / slotMs) * slotMs;
+    if (!buckets.has(key)) buckets.set(key, { sum: 0, count: 0 });
+    const b = buckets.get(key);
+    b.sum += power;
+    b.count += 1;
+  });
+
+  const series = [];
+  const firstSlot = Math.floor(start / slotMs) * slotMs;
+  const lastSlot = Math.floor(end / slotMs) * slotMs;
+  for (let t = firstSlot; t <= lastSlot; t += slotMs) {
+    const b = buckets.get(t);
+    series.push({ t, power: b ? b.sum / b.count : null });
+  }
+  return series;
+}
 
 // Convert an array of telemetry records to CSV and trigger a browser download.
 // Excel opens CSV with a UTF-8 BOM correctly, so no .xlsx library needed.
@@ -136,6 +176,18 @@ export default function InverterDetailsPage() {
 
   // Memoize so the queryKey stays stable across renders (only changes at midnight).
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
+
+  // This page only ever fetched telemetry, so it had nothing to say about the
+  // unit itself. The inverter record — name, model, and where it is installed —
+  // rides along on the fleet list, which is already cached under one shared
+  // query key, so arriving from /inverters costs no extra request.
+  const { data: fleet = [] } = useLiveInverters();
+  const inverterMeta = useMemo(
+    () => fleet.find((i) => String(i.id) === String(inverterId)) ?? null,
+    [fleet, inverterId]
+  );
+
+  const locationLabel = formatLocation(inverterMeta);
 
   // Two separate queries, deliberately NOT one — they have opposite freshness
   // needs and opposite size:
@@ -325,13 +377,80 @@ export default function InverterDetailsPage() {
     refetchOnWindowFocus: false,
   });
 
-  // Build the chart series — aggregation per the spec for each range:
-  //  10m → raw 5s samples, 1h → per-minute averages,
-  //  1d/1w/custom → per hour, 1mo → per day (aggregated from hourly buckets).
+  // Raw telemetry across the chart's own window — the feed for 24h / week /
+  // month / custom.
+  //
+  // /power-generation/ only stores hourly buckets, which is why those tabs used
+  // to draw one averaged point per hour (or per day). This reads the readings
+  // themselves, so everything between those hours is on screen.
+  //
+  // The backend exposes `timestamp__gte` but no upper bound, so the window is
+  // requested ASCENDING from its start — the first pages are then exactly the
+  // window — and the tail is trimmed here. Never polled: this is history, and
+  // the live cards above already refresh on their own 10 s cycle.
+  // The window is pinned once per range so the fetch and the slot grid below
+  // agree on its edges — recomputing Date.now() in both would leave the grid
+  // reaching a moment the fetch never asked for.
+  const chartWindow = useMemo(() => {
+    if (currentRange.feed !== "window") return null;
+    if (currentRange.customDay) {
+      const d = new Date(`${customDate}T00:00:00`);
+      d.setHours(0, 0, 0, 0);
+      const start = d.getTime();
+      return { start, end: start + 24 * 60 * 60 * 1000 };
+    }
+    const end = Date.now();
+    return { start: end - currentRange.windowMin * 60 * 1000, end };
+  }, [currentRange, customDate]);
+
+  const { data: windowRaw = [], isLoading: windowRawLoading } = useQuery({
+    queryKey: ["chartRawWindow", inverterId, chartRange, customDate],
+    queryFn: async () => {
+      const { start, end } = chartWindow;
+
+      const base =
+        `/inverter/inverter-data/?inverter=${inverterId}` +
+        `&timestamp__gte=${encodeURIComponent(new Date(start).toISOString())}` +
+        `&ordering=timestamp&page_size=5000`;
+
+      const rows = [];
+      const MAX_PAGES = 12; // 60k rows — far past a month for a single inverter
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        let res;
+        try {
+          res = await getData(page === 1 ? base : `${base}&page=${page}`);
+        } catch {
+          break;
+        }
+        const results = res?.results || [];
+        if (results.length === 0) break;
+        rows.push(...results);
+        const lastT = new Date(results[results.length - 1].timestamp).getTime();
+        if (!res.next || lastT >= end) break;
+      }
+
+      return rows
+        .map((r) => ({
+          t: new Date(r.timestamp).getTime(),
+          power: parseFloat(r.power_out || 0),
+        }))
+        .filter((p) => Number.isFinite(p.t) && p.t >= start && p.t <= end)
+        .sort((a, b) => a.t - b.t);
+    },
+    enabled: !!inverterId && !!chartWindow,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    refetchInterval: false,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+  });
+
+  // Build the chart series. 10m → raw samples, 1h → per-minute averages, and
+  // every longer range → the raw readings across the window.
   const chartData = useMemo(() => {
     const MIN_W = 1; // values below 1 W are standby noise — hide from chart
 
-    if (currentRange.source === "raw") {
+    if (currentRange.feed === "recent") {
       const cutoff = Date.now() - currentRange.windowMin * 60 * 1000;
       // The trend charts show ALL recorded telemetry in the window, including
       // replayed backlog — so previous data stays visible. Only the "current"
@@ -379,104 +498,28 @@ export default function InverterDetailsPage() {
       return series;
     }
 
-    // Source: /power-generation/ (already hourly buckets server-side).
-    const records = chartPgData?.results || [];
-    if (currentRange.bucketKind === "hour") {
-      // 1d / custom — render ONE bar for every hour in the window (24 bars),
-      // including hours that have no data (those become 0-height bars). The
-      // backend may store records at HH:30 inside the hour, so we bucket each
-      // record by floor(timestamp / 1h) and lookup by hour-start key.
-      const HOUR_MS = 60 * 60 * 1000;
-      // Floor an epoch to the viewer's LOCAL hour boundary. The axis labels and
-      // the custom-day window are both in local time, so records must bucket on
-      // local hours too. Flooring on UTC (Math.floor(t/HOUR_MS)) instead made
-      // the Custom-date tab miss every record for non-UTC browsers (e.g. IST,
-      // where local midnight is 18:30 UTC — a :30 offset that never lines up
-      // with a UTC hour key), rendering an all-zero day.
-      const localHourFloor = (ms) => {
-        const d = new Date(ms);
-        d.setMinutes(0, 0, 0);
-        return d.getTime();
-      };
-      const byHour = new Map();
-      records.forEach((r) => {
-        const key = localHourFloor(new Date(r.measurement_time).getTime());
-        if (!byHour.has(key)) byHour.set(key, { powerSum: 0, count: 0, energy: 0 });
-        const b = byHour.get(key);
-        b.powerSum += parseFloat(r.avg_power || 0);
-        b.count += 1;
-        b.energy += parseFloat(r.energy_generated || 0);
-      });
+    // 24h / week / month / custom — the readings themselves across a continuous
+    // grid, rather than one averaged point per hour or per day.
+    if (!chartWindow) return [];
+    return toSlotSeries(
+      windowRaw,
+      currentRange.slotSec * 1000,
+      chartWindow.start,
+      chartWindow.end
+    ).map((d) => ({
+      t: d.t,
+      time: format(new Date(d.t), currentRange.axisFmt),
+      power: d.power != null && d.power >= MIN_W ? d.power : null,
+    }));
+  }, [currentRange, recentData, windowRaw, chartWindow]);
 
-      // Pick the 24-hour window (all local-hour aligned):
-      //  - "1d": rolling — from current-hour-23 to current-hour
-      //  - "custom": that calendar day 00:00–23:00 local
-      let startHourMs;
-      if (chartRange === "custom") {
-        const dt = new Date(`${customDate}T00:00:00`);
-        dt.setHours(0, 0, 0, 0);
-        startHourMs = dt.getTime();
-      } else {
-        startHourMs = localHourFloor(Date.now()) - 23 * HOUR_MS;
-      }
-
-      const series = [];
-      for (let i = 0; i < 24; i++) {
-        const t = startHourMs + i * HOUR_MS;
-        const b = byHour.get(localHourFloor(t));
-        const avg = b && b.count ? b.powerSum / b.count : 0;
-        series.push({
-          t,
-          time: format(new Date(t), "HH:mm"),
-          power: avg >= MIN_W ? avg : null,
-          energy: b ? b.energy : 0,
-        });
-      }
-      return series;
-    }
-    // 1w / 1mo — aggregate hourly records into per-day buckets, then render
-    // one bar for EVERY day in the window (7 or 30). Days with no telemetry
-    // render as 0-height bars so the X-axis spans the full requested range
-    // instead of just the days that happened to have data.
-    const byDay = new Map();
-    records.forEach((r) => {
-      const d = new Date(r.measurement_time);
-      const dayStart = new Date(d);
-      dayStart.setHours(0, 0, 0, 0);
-      const key = dayStart.getTime();
-      if (!byDay.has(key)) byDay.set(key, { powerSum: 0, count: 0, energy: 0 });
-      const b = byDay.get(key);
-      b.powerSum += parseFloat(r.avg_power || 0);
-      b.count += 1;
-      b.energy += parseFloat(r.energy_generated || 0);
-    });
-
-    const days = currentRange.windowDay || 30;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const series = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const dayStart = new Date(today);
-      dayStart.setDate(dayStart.getDate() - i);
-      const t = dayStart.getTime();
-      const b = byDay.get(t);
-      const dayAvg = b && b.count ? b.powerSum / b.count : 0;
-      series.push({
-        t,
-        time: format(new Date(t), "dd MMM"),
-        power: dayAvg >= MIN_W ? dayAvg : null,
-        energy: b ? b.energy : 0,
-      });
-    }
-    return series;
-  }, [currentRange, recentData, chartPgData]);
-
-  const yUnit = currentRange.source === "pg" ? " W avg" : " W";
+  // Every series on this chart is now raw power, so there is no averaged
+  // "W avg" variant left to label.
+  const yUnit = " W";
   // Scroll once bars would otherwise be < ~20 px wide. Drops the threshold
   // from 80 → 40 so the Last 1 hour view (60 bars) gets fatter, readable bars
   // with a horizontal scrollbar instead of being squeezed into the card width.
   const needsScroll = chartData.length > 40;
-  const scrollWidth = needsScroll ? Math.max(800, chartData.length * 22) : 0;
 
   // Total generation for whichever range tab is currently selected — NOT
   // hard-coded to "today" the way the old Daily Energy card was (which stayed
@@ -529,6 +572,12 @@ export default function InverterDetailsPage() {
                   ? `Last seen ${formatLastSeen(latestReading.timestamp)}`
                   : "No live data — replaying backlog"}
               </p>
+              {locationLabel && (
+                <p className="text-[11px] text-slate-500 mt-1.5 flex items-start gap-1">
+                  <MapPin size={11} className="text-slate-400 shrink-0 mt-0.5" />
+                  <span>{locationLabel}</span>
+                </p>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
@@ -686,13 +735,13 @@ export default function InverterDetailsPage() {
                       <h3 className="text-base font-bold text-slate-900">Generation Trend</h3>
                       <p className="text-xs text-slate-500">
                         {chartData.length} data points ·{" "}
-                        {currentRange.source === "raw" && !currentRange.bucketSec
+                        {currentRange.feed === "recent" && !currentRange.bucketSec
                           ? "raw telemetry (5-second precision)"
-                          : currentRange.source === "raw"
+                          : currentRange.feed === "recent"
                           ? "per-minute average"
-                          : currentRange.bucketKind === "day"
-                          ? "per-day average"
-                          : "per-hour average from backend"}
+                          : currentRange.slotSec < 60
+                          ? `${currentRange.slotSec}-second resolution`
+                          : `${currentRange.slotSec / 60}-minute resolution`}
                       </p>
                       {chartRange === "custom" && (
                         <input
@@ -721,202 +770,37 @@ export default function InverterDetailsPage() {
                     </div>
                   </div>
 
-                  {/* Chart — horizontally scrollable only when there's too much data for one view */}
-                  {chartPgLoading ? (
+                  {/* Chart — hopeCloud-styled trend. Long ranges get a brush
+                      instead of the old sticky-Y-axis + horizontal scroll. */}
+                  {(currentRange.feed === "window" ? windowRawLoading : chartPgLoading) ? (
                     <div className="h-72 flex items-center justify-center text-sm text-slate-400">
                       <RefreshCw size={20} className="animate-spin mr-2" /> Loading…
                     </div>
-                  ) : chartData.length === 0 ? (
-                    <div className="h-72 flex items-center justify-center text-sm text-slate-400">
-                      No data in this range yet.
-                    </div>
-                  ) : needsScroll ? (
-                    // Two-chart pattern: sticky Y-axis on the left, only the
-                    // plot area scrolls. The Y-axis chart is layered above
-                    // the scroll container so its labels never move.
-                    <div className="relative" style={{ height: 420 }}>
-                      {/* Sticky Y-axis layer */}
-                      <div
-                        className="absolute top-0 left-0 z-10 pointer-events-none bg-white"
-                        style={{ width: 70, height: 420 }}
-                      >
-                        <BarChart
-                          width={70}
-                          height={420}
-                          data={chartData}
-                          margin={{ top: 10, right: 0, left: 5, bottom: 30 }}
-                        >
-                          <YAxis
-                            domain={[0, "auto"]}
-                            tick={{ fontSize: 10, fill: "#6B7280" }}
-                            unit={yUnit}
-                          />
-                          <Bar dataKey="power" fill="transparent" />
-                        </BarChart>
-                      </div>
-
-                      {/* Scrollable plot area — Y-axis is rendered invisibly so
-                          the data chart's left margin matches the sticky Y-axis. */}
-                      <div className="overflow-x-auto scrollbar-thin" style={{ height: 420 }}>
-                        {chartType === "line" ? (
-                          <AreaChart
-                            width={scrollWidth}
-                            height={420}
-                            data={chartData}
-                            margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
-                          >
-                            <defs>
-                              <linearGradient id="powerFill" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#5B6BB5" stopOpacity={0.28} />
-                                <stop offset="100%" stopColor="#5B6BB5" stopOpacity={0} />
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                            <XAxis
-                              dataKey="time"
-                              tick={{ fontSize: 10, fill: "#6B7280" }}
-                              interval={Math.max(0, Math.floor(chartData.length / 30))}
-                            />
-                            <YAxis
-                              domain={[0, "auto"]}
-                              tick={false}
-                              axisLine={false}
-                              width={70}
-                            />
-                            <Tooltip
-                              formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
-                              labelFormatter={(_, payload) => {
-                                const t = payload?.[0]?.payload?.t;
-                                if (!t) return "";
-                                if (currentRange.bucketKind === "day")
-                                  return format(new Date(t), "EEE, dd MMM yyyy");
-                                if (currentRange.bucketKind === "hour")
-                                  return format(new Date(t), "EEE, dd MMM HH:mm");
-                                return format(new Date(t), "EEE, dd MMM HH:mm:ss");
-                              }}
-                              contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                            />
-                            <Area
-                              type="monotone"
-                              connectNulls
-                              dataKey="power"
-                              stroke="#5B6BB5"
-                              strokeWidth={2}
-                              fill="url(#powerFill)"
-                              dot={{ r: 2, fill: "#5B6BB5", strokeWidth: 0 }}
-                              activeDot={{ r: 5 }}
-                              isAnimationActive={false}
-                            />
-                          </AreaChart>
-                        ) : (
-                          <BarChart
-                            width={scrollWidth}
-                            height={420}
-                            data={chartData}
-                            margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
-                          >
-                            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                            <XAxis
-                              dataKey="time"
-                              tick={{ fontSize: 10, fill: "#6B7280" }}
-                              interval={Math.max(0, Math.floor(chartData.length / 30))}
-                            />
-                            <YAxis
-                              domain={[0, "auto"]}
-                              tick={false}
-                              axisLine={false}
-                              width={70}
-                            />
-                            <Tooltip
-                              formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
-                              labelFormatter={(_, payload) => {
-                                const t = payload?.[0]?.payload?.t;
-                                if (!t) return "";
-                                if (currentRange.bucketKind === "day")
-                                  return format(new Date(t), "EEE, dd MMM yyyy");
-                                if (currentRange.bucketKind === "hour")
-                                  return format(new Date(t), "EEE, dd MMM HH:mm");
-                                return format(new Date(t), "EEE, dd MMM HH:mm:ss");
-                              }}
-                              contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                            />
-                            <Bar
-                              dataKey="power"
-                              fill="#E97451"
-                              radius={[3, 3, 0, 0]}
-                              maxBarSize={20}
-                            />
-                          </BarChart>
-                        )}
-                      </div>
-                    </div>
                   ) : (
-                    <div style={{ width: "100%", height: 420 }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        {chartType === "line" ? (
-                          <AreaChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                            <defs>
-                              <linearGradient id="powerFillResponsive" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="0%" stopColor="#5B6BB5" stopOpacity={0.28} />
-                                <stop offset="100%" stopColor="#5B6BB5" stopOpacity={0} />
-                              </linearGradient>
-                            </defs>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                            <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={20} />
-                            <YAxis domain={[0, "auto"]} tick={{ fontSize: 10, fill: "#6B7280" }} unit={yUnit} width={70} />
-                            <Tooltip
-                              formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
-                              labelFormatter={(_, payload) => {
-                                const t = payload?.[0]?.payload?.t;
-                                if (!t) return "";
-                                if (currentRange.bucketKind === "day")
-                                  return format(new Date(t), "EEE, dd MMM yyyy");
-                                if (currentRange.bucketKind === "hour")
-                                  return format(new Date(t), "EEE, dd MMM HH:mm");
-                                return format(new Date(t), "EEE, dd MMM HH:mm:ss");
-                              }}
-                              contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                            />
-                            <Area
-                              type="monotone"
-                              connectNulls
-                              dataKey="power"
-                              stroke="#5B6BB5"
-                              strokeWidth={2}
-                              fill="url(#powerFillResponsive)"
-                              dot={{ r: 2, fill: "#5B6BB5", strokeWidth: 0 }}
-                              activeDot={{ r: 5 }}
-                              isAnimationActive={false}
-                            />
-                          </AreaChart>
-                        ) : (
-                          <BarChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
-                            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                            <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={20} />
-                            <YAxis domain={[0, "auto"]} tick={{ fontSize: 10, fill: "#6B7280" }} unit={yUnit} width={70} />
-                            <Tooltip
-                              formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
-                              labelFormatter={(_, payload) => {
-                                const t = payload?.[0]?.payload?.t;
-                                if (!t) return "";
-                                if (currentRange.bucketKind === "day")
-                                  return format(new Date(t), "EEE, dd MMM yyyy");
-                                if (currentRange.bucketKind === "hour")
-                                  return format(new Date(t), "EEE, dd MMM HH:mm");
-                                return format(new Date(t), "EEE, dd MMM HH:mm:ss");
-                              }}
-                              contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                            />
-                            <Bar
-                              dataKey="power"
-                              fill="#E97451"
-                              radius={[4, 4, 0, 0]}
-                              maxBarSize={28}
-                            />
-                          </BarChart>
-                        )}
-                      </ResponsiveContainer>
-                    </div>
+                    <TrendChart
+                      data={chartData}
+                      xKey="time"
+                      height={420}
+                      unitLeft={yUnit.trim()}
+                      brush={needsScroll}
+                      series={[
+                        {
+                          key: "power",
+                          name: "Power",
+                          type: chartType === "line" ? "area" : "bar",
+                          unit: "W",
+                          decimals: 0,
+                          maxBarSize: needsScroll ? 20 : 28,
+                        },
+                      ]}
+                      tooltipLabelFormatter={(_, payload) => {
+                        const t = payload?.[0]?.payload?.t;
+                        if (!t) return "";
+                        // Points now carry a real reading timestamp on every
+                        // range, so the readout always names the exact moment.
+                        return format(new Date(t), "EEE, dd MMM HH:mm:ss");
+                      }}
+                    />
                   )}
                 </section>
 

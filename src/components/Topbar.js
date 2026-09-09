@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Search, ChevronDown, User, LogOut, Settings as SettingsIcon } from "lucide-react";
 import { clearToken } from "@/lib/auth";
 import { showSuccess } from "@/lib/toast";
+import SiteSelector from "@/components/SiteSelector";
 
 export default function Topbar({ title, breadcrumbs = [] }) {
   const router = useRouter();
@@ -55,8 +56,14 @@ export default function Topbar({ title, breadcrumbs = [] }) {
           <h1 className="text-lg font-bold text-slate-900 truncate">{title}</h1>
         </div>
 
-        {/* Right: Search + User */}
+        {/* Right: Site scope + Search + User */}
         <div className="flex items-center gap-3">
+          {/* Scopes every operator page to one site. Lives in the topbar so the
+              selection is visible and changeable from wherever you are. */}
+          <div className="hidden md:block">
+            <SiteSelector />
+          </div>
+
           <div className="hidden lg:flex items-center bg-slate-100 rounded-lg px-3 py-2 w-72">
             <Search size={16} className="text-slate-400 shrink-0" />
             <input

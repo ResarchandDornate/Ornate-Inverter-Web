@@ -9,27 +9,14 @@ import {
   AlertTriangle,
   ArrowUpRight,
   Activity,
+  MapPin,
 } from "lucide-react";
-import {
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  Cell,
-  LineChart,
-  Line,
-  ComposedChart,
-  Area,
-  ReferenceDot,
-} from "recharts";
+import { TrendChart } from "@/components/charts/TrendChart";
 import { getData } from "@/lib/api";
 import Topbar from "@/components/Topbar";
 import KpiCard from "@/components/KpiCard";
 import StatusBadge from "@/components/StatusBadge";
-import { useLiveInverters } from "@/hooks/useLiveInverters";
+import { useScopedInverters } from "@/hooks/useScopedInverters";
 import {
   computeStatus,
   hasActiveFault,
@@ -37,25 +24,132 @@ import {
   isLive,
   parseFaultBitmask,
   formatFaultBitmask,
+  formatLocation,
 } from "@/lib/inverterStatus";
 import WeatherWidget from "@/components/WeatherWidget";
 import { useChartType } from "@/hooks/useChartType";
 
 const MAX_LIVE_SAMPLES = 30; // ~5 min @ 10s polling
 
+// Every tab now draws from raw telemetry on a continuous grid, the way the
+// inverter detail page does — so the points BETWEEN each hour or day are on
+// screen instead of one averaged bucket. Slot widths are sized to land each
+// window near ~1,000-1,500 points.
 const RANGES = [
-  { id: "1h",   label: "Last 1 hour" },
-  { id: "24h",  label: "Last 24h" },
-  { id: "7d",   label: "Last 7 days" },
-  { id: "30d",  label: "Last 30 days" },
+  { id: "1h",   label: "Last 1 hour",   windowMin: 60,            slotSec: 300,  withDate: false },
+  { id: "24h",  label: "Last 24h",      windowMin: 60 * 24,       slotSec: 60,   withDate: false },
+  { id: "7d",   label: "Last 7 days",   windowMin: 60 * 24 * 7,   slotSec: 600,  withDate: true },
+  { id: "30d",  label: "Last 30 days",  windowMin: 60 * 24 * 30,  slotSec: 1800, withDate: true },
 ];
 
+const fmtSlot = (ms) => {
+  const d = new Date(ms);
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+/**
+ * Fold raw /inverter-data/ rows onto a continuous grid of fixed slots.
+ *
+ * Inside a slot each inverter's power_out is averaged first — a busy inverter
+ * must not outweigh a quiet one merely by reporting more often — and those
+ * per-inverter averages are then summed into a fleet figure.
+ *
+ * Every slot across [start, end] is emitted, including ones with no readings,
+ * which come back null. That grid is what keeps the time axis honest: on a
+ * categorical axis the readings alone would collapse every gap, so a fleet
+ * offline all night would render as one continuous daylight curve.
+ *
+ * Energy is integrated from the slot's power rather than read off the row —
+ * raw telemetry carries power only; /power-generation/ is the endpoint holding
+ * pre-aggregated energy.
+ */
+function fleetSlotSeries(rows, slotMs, start, end, withDate) {
+  const buckets = new Map();
+
+  (rows || []).forEach((r) => {
+    const t = new Date(r.timestamp).getTime();
+    if (!Number.isFinite(t)) return;
+    const key = Math.floor(t / slotMs) * slotMs;
+    if (!buckets.has(key)) buckets.set(key, new Map());
+    const perInverter = buckets.get(key);
+    const invId = r.inverter;
+    if (!perInverter.has(invId)) perInverter.set(invId, { sum: 0, count: 0 });
+    const inv = perInverter.get(invId);
+    inv.sum += parseFloat(r.power_out || 0);
+    inv.count += 1;
+  });
+
+  const pad = (n) => String(n).padStart(2, "0");
+  const series = [];
+  const firstSlot = Math.floor(start / slotMs) * slotMs;
+  const lastSlot = Math.floor(end / slotMs) * slotMs;
+
+  for (let t = firstSlot; t <= lastSlot; t += slotMs) {
+    const perInverter = buckets.get(t);
+    let fleetPower = null;
+    if (perInverter) {
+      fleetPower = 0;
+      perInverter.forEach((inv) => {
+        fleetPower += inv.count > 0 ? inv.sum / inv.count : 0;
+      });
+    }
+    const d = new Date(t);
+    const clock = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    series.push({
+      sortKey: t,
+      label: withDate ? `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${clock}` : clock,
+      avgPower: fleetPower,
+      energy: fleetPower == null ? 0 : (fleetPower * (slotMs / 3600000)) / 1000,
+    });
+  }
+  return series;
+}
+
+/**
+ * Fetch /power-generation/ narrowed to a set of inverters.
+ *
+ * The endpoint aggregates either the whole fleet or exactly one inverter —
+ * there is no multi-inverter filter — so a site scope has to be assembled. When
+ * the fleet response tags each row with its inverter, one request is enough and
+ * the narrowing happens here. When it does not, fall back to asking per
+ * inverter and concatenating, the same shape the detail page already fetches.
+ *
+ * `ids` of null means the entire fleet, which is the plain single request.
+ */
+async function fetchPgScoped(query, ids) {
+  const fleet = await getData(`/inverter/power-generation/?${query}`);
+  const rows = fleet?.results || [];
+  if (!ids) return { results: rows };
+
+  if (rows.length && rows[0].inverter != null) {
+    const want = new Set(ids.map(String));
+    return { results: rows.filter((r) => want.has(String(r.inverter))) };
+  }
+
+  const perInverter = await Promise.all(
+    ids.map((id) =>
+      getData(`/inverter/power-generation/?inverter=${id}&${query}`).catch(() => null)
+    )
+  );
+  return { results: perInverter.flatMap((r) => r?.results || []) };
+}
+
 export default function DashboardPage() {
-  const { data: inverters = [], dataUpdatedAt } = useLiveInverters();
+  const { data: inverters = [], dataUpdatedAt, site } = useScopedInverters();
+
+  // A site scope narrows raw telemetry client-side — those rows already carry
+  // their inverter id, so no second request is needed for them.
+  const scopedIds = useMemo(() => inverters.map((i) => i.id), [inverters]);
+  const scopedIdSet = useMemo(() => new Set(scopedIds.map(String)), [scopedIds]);
+  const inScope = (rows) =>
+    site ? (rows || []).filter((r) => scopedIdSet.has(String(r.inverter))) : rows || [];
   const [liveSeries, setLiveSeries] = useState([]);
   const [seeded, setSeeded] = useState(false);
   const [range, setRange] = useState("1h");
   const [chartType] = useChartType(); // global "bar" | "line" from Settings
+
+  const currentRange = RANGES.find((r) => r.id === range) || RANGES[0];
 
   // Pre-seed the Live chart with the last 5 minutes of real history so the
   // chart appears populated immediately instead of waiting for 30 polls.
@@ -74,15 +168,23 @@ export default function DashboardPage() {
     staleTime: Infinity,
   });
 
+  // Changing site invalidates the accumulated live series — it was summed over
+  // a different set of inverters — so drop it and re-seed against the new scope.
+  useEffect(() => {
+    setLiveSeries([]);
+    setSeeded(false);
+  }, [site]);
+
   useEffect(() => {
     if (seeded || !historicalSeed) return;
-    if (historicalSeed.length === 0) {
+    const seedRows = inScope(historicalSeed);
+    if (seedRows.length === 0) {
       setSeeded(true);
       return;
     }
     // Bucket records into 10-second windows, summing power_out across inverters
     const buckets = new Map();
-    historicalSeed.forEach((r) => {
+    seedRows.forEach((r) => {
       const t = new Date(r.timestamp).getTime();
       const bucketKey = Math.floor(t / 10000) * 10000;
       if (!buckets.has(bucketKey)) {
@@ -107,7 +209,8 @@ export default function DashboardPage() {
       .slice(-MAX_LIVE_SAMPLES);
     setLiveSeries(sorted);
     setSeeded(true);
-  }, [historicalSeed, seeded]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [historicalSeed, seeded, site, scopedIdSet]);
 
   // Treat an inverter as "actually reporting" only when the backend says so.
   // Offline inverters keep their last cached power_out / temperature values,
@@ -160,11 +263,13 @@ export default function DashboardPage() {
   // Memoize so the queryKey stays stable across renders (only changes at midnight).
   const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
   const { data: todayPgData } = useQuery({
-    queryKey: ["dashboardTodayEnergy", todayStr],
+    queryKey: ["dashboardTodayEnergy", todayStr, site, scopedIds.join(",")],
     queryFn: () =>
-      getData(
-        `/inverter/power-generation/?date=${todayStr}&ordering=measurement_time`
+      fetchPgScoped(
+        `date=${todayStr}&ordering=measurement_time`,
+        site ? scopedIds : null
       ),
+    enabled: !site || scopedIds.length > 0,
     refetchInterval: 5 * 60 * 1000,
     staleTime: 2 * 60 * 1000,
   });
@@ -184,114 +289,100 @@ export default function DashboardPage() {
 
   // Historical aggregates from /power-generation/ — used by 24h / 7d / 30d.
   const { data: pgData, isLoading: pgLoading, error: pgError } = useQuery({
-    queryKey: ["powerGenerationRange", range],
+    queryKey: ["powerGenerationRange", range, site, scopedIds.join(",")],
     queryFn: () =>
       // page_size (honored server-side) replaces the ignored limit param —
       // without it the 7d/30d charts silently truncated at 100 hourly rows.
-      getData(
-        `/inverter/power-generation/?range=${pgRangeParam}&ordering=measurement_time&page_size=5000`
+      fetchPgScoped(
+        `range=${pgRangeParam}&ordering=measurement_time&page_size=5000`,
+        site ? scopedIds : null
       ),
-    enabled: !!pgRangeParam,
+    enabled: !!pgRangeParam && (!site || scopedIds.length > 0),
     refetchInterval: 5 * 60 * 1000,
     staleTime: 2 * 60 * 1000,
   });
 
-  // Raw telemetry for the last hour — /power-generation/ only stores HOURLY
-  // aggregates, so the 1h view reads raw rows. The server filters the window
-  // (?timestamp__gte) and returns up to 5000 rows in ONE request — the old
-  // pattern crawled up to 12 sequential 100-row pages of the whole day every
-  // 60 s just to keep the last hour.
-  const { data: oneHourData, isLoading: oneHourLoading, error: oneHourError } = useQuery({
-    queryKey: ["dashboard1hRaw"],
+  // The window is pinned once per range so the fetch and the slot grid agree on
+  // its edges — recomputing Date.now() in both would leave the grid reaching a
+  // moment the fetch never asked for.
+  const chartWindow = useMemo(() => {
+    const end = Date.now();
+    return { start: end - currentRange.windowMin * 60 * 1000, end };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range]);
+
+  // Raw telemetry across the whole selected window.
+  //
+  // /power-generation/ only stores hourly buckets, which is why the 24h/7d/30d
+  // tabs used to draw one averaged point per hour or day. Reading the readings
+  // themselves puts everything between those hours on screen.
+  //
+  // Fetched fleet-wide and narrowed to the selected site client-side, so
+  // switching sites re-renders from cache instead of re-fetching. The backend
+  // exposes `timestamp__gte` but no upper bound, so the window is requested
+  // ASCENDING from its start — the first pages are then exactly the window.
+  const { data: windowRaw = [], isLoading: rawLoading, error: rawError } = useQuery({
+    queryKey: ["dashboardRawWindow", range],
     queryFn: async () => {
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      const res = await getData(
-        `/inverter/inverter-data/?timestamp__gte=${encodeURIComponent(oneHourAgo)}&ordering=-timestamp&page_size=5000`
-      );
-      return res?.results || [];
+      const base =
+        `/inverter/inverter-data/?timestamp__gte=` +
+        `${encodeURIComponent(new Date(chartWindow.start).toISOString())}` +
+        `&ordering=timestamp&page_size=5000`;
+      const rows = [];
+      const MAX_PAGES = 12; // 60k rows — a ceiling, not a limit met in practice
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        let res;
+        try {
+          res = await getData(page === 1 ? base : `${base}&page=${page}`);
+        } catch {
+          break;
+        }
+        const results = res?.results || [];
+        if (results.length === 0) break;
+        rows.push(...results);
+        const lastT = new Date(results[results.length - 1].timestamp).getTime();
+        if (!res.next || lastT >= chartWindow.end) break;
+      }
+      return rows;
     },
-    enabled: range === "1h",
-    refetchInterval: 60 * 1000,
-    staleTime: 50 * 1000,
+    // Only the 1h tab is a live view; the longer windows are history.
+    refetchInterval: range === "1h" ? 60 * 1000 : false,
+    staleTime: range === "1h" ? 50 * 1000 : 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
-  const histLoading = range === "1h" ? oneHourLoading : pgLoading;
-  const histError = range === "1h" ? oneHourError : pgError;
+  const histLoading = rawLoading;
+  const histError = rawError;
 
-  const historicalChart = useMemo(() => {
-    if (range === "live") return [];
+  const historicalChart = useMemo(
+    () =>
+      fleetSlotSeries(
+        inScope(windowRaw),
+        currentRange.slotSec * 1000,
+        chartWindow.start,
+        chartWindow.end,
+        currentRange.withDate
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [windowRaw, currentRange, chartWindow, site, scopedIdSet]
+  );
 
-    if (range === "1h") {
-      // Bucket raw telemetry into 5-minute groups keyed off the reading
-      // timestamp — 60 min / 5 = 12 bars. For each bucket we average
-      // power_out per inverter, then sum across the fleet.
-      const FIVE_MIN_MS = 5 * 60 * 1000;
-      const buckets = new Map();
-      (oneHourData || []).forEach((r) => {
-        const t = new Date(r.timestamp).getTime();
-        const bucketStart = Math.floor(t / FIVE_MIN_MS) * FIVE_MIN_MS;
-        if (!buckets.has(bucketStart)) {
-          buckets.set(bucketStart, { t: bucketStart, perInverter: new Map() });
-        }
-        const bucket = buckets.get(bucketStart);
-        const invId = r.inverter;
-        if (!bucket.perInverter.has(invId)) {
-          bucket.perInverter.set(invId, { sum: 0, count: 0 });
-        }
-        const inv = bucket.perInverter.get(invId);
-        inv.sum += parseFloat(r.power_out || 0);
-        inv.count += 1;
-      });
-      return [...buckets.values()]
-        .sort((a, b) => a.t - b.t)
-        .map((bucket) => {
-          let fleetAvgPower = 0;
-          bucket.perInverter.forEach((inv) => {
-            fleetAvgPower += inv.count > 0 ? inv.sum / inv.count : 0;
-          });
-          const d = new Date(bucket.t);
-          const pad = (n) => String(n).padStart(2, "0");
-          return {
-            sortKey: bucket.t,
-            label: `${pad(d.getHours())}:${pad(d.getMinutes())}`,
-            avgPower: fleetAvgPower,
-            // Integrate power over this 5-minute bucket to get real energy
-            // (kWh = avgPower(W) × hours ÷ 1000), instead of leaving this at
-            // 0 — the 1h view has no pre-aggregated energy_generated records
-            // like the 24h/7d/30d views, but the raw power samples are
-            // enough to derive it directly.
-            energy: (fleetAvgPower * (FIVE_MIN_MS / 3600000)) / 1000,
-          };
-        });
+  // Range energy stays on the backend's pre-aggregated kWh, which is
+  // authoritative. The 1h tab has no hourly bucket to read yet, so it falls back
+  // to integrating the raw power samples the chart is already drawing.
+  const rangeTotalEnergy = useMemo(() => {
+    if (pgRangeParam) {
+      return (pgData?.results || []).reduce(
+        (s, r) => s + parseFloat(r.energy_generated || 0),
+        0
+      );
     }
+    return historicalChart.reduce((s, b) => s + (b.energy || 0), 0);
+  }, [pgRangeParam, pgData, historicalChart]);
 
-    // 24h / 7d / 30d — group /power-generation/ records by hour or day.
-    const records = pgData?.results || [];
-    const byKey = {};
-    records.forEach((r) => {
-      const d = new Date(r.measurement_time);
-      let key, label;
-      if (range === "24h") {
-        key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}-${d.getHours()}`;
-        label = `${String(d.getHours()).padStart(2, "0")}:00`;
-      } else {
-        key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-        label = `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
-      }
-      if (!byKey[key]) byKey[key] = { key, label, sortKey: d.getTime(), energy: 0, avgPower: 0, count: 0 };
-      byKey[key].energy += parseFloat(r.energy_generated || 0);
-      byKey[key].avgPower += parseFloat(r.avg_power || 0);
-      byKey[key].count += 1;
-    });
-    return Object.values(byKey)
-      .map((b) => ({ ...b, avgPower: b.count ? b.avgPower / b.count : 0 }))
-      .sort((a, b) => a.sortKey - b.sortKey);
-  }, [pgData, oneHourData, range]);
-
-  const rangeTotalEnergy = historicalChart.reduce((s, b) => s + (b.energy || 0), 0);
   const rangePeakPower = historicalChart.reduce((m, b) => Math.max(m, b.avgPower || 0), 0);
-  const isPowerView = range === "1h"; // 1h uses power bars (W), others use energy bars (kWh)
-  const chartValueKey = isPowerView ? "avgPower" : "energy";
+  // Every tab now plots raw power, so the axis is kW throughout.
+  const chartValueKey = "avgPower";
 
   // Highest / lowest data points — annotated on the line view.
   const { hiPoint, loPoint } = useMemo(() => {
@@ -353,14 +444,14 @@ export default function DashboardPage() {
             <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
               <div>
                 <h2 className="text-base font-bold text-slate-900">
-                  {range === "live" ? "Live Generation" : "Historical Generation"}
+                  Historical Generation
                 </h2>
                 <p className="text-xs text-slate-500">
-                  {range === "1h"
-                    ? `Aggregate AC power (W) · 5-min intervals · last hour (12 bars)`
-                    : range === "24h"
-                    ? `Energy generated per hour (kWh) · last 24 hours`
-                    : `Energy generated per day (kWh) · last ${range === "7d" ? "7" : "30"} days`}
+                  {historicalChart.length} data points · aggregate AC power ·{" "}
+                  {currentRange.slotSec < 60
+                    ? `${currentRange.slotSec}-second`
+                    : `${currentRange.slotSec / 60}-minute`}{" "}
+                  resolution · {currentRange.label.toLowerCase()}
                 </p>
               </div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -384,7 +475,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Summary strip — totals for the selected range */}
-            {range !== "live" && historicalChart.length > 0 && (
+            {historicalChart.length > 0 && (
               <div className="grid grid-cols-2 gap-3 mb-4">
                 <div className="bg-slate-50 rounded-lg p-3 border border-slate-100">
                   <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Total Energy</p>
@@ -401,299 +492,65 @@ export default function DashboardPage() {
               </div>
             )}
 
-            {/* Chart — bar charts on every tab. 7d (168 bars) scrolls with
-                a sticky Y-axis; everything else fits the card via ResponsiveContainer. */}
-            <div style={{ width: "100%", height: 480 }}>
-              {range === "live" ? (
-                !seeded || liveSeries.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-full text-sm text-slate-400">
-                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-orange-500 border-t-transparent mb-3" />
-                    {seeded ? "Waiting for first sample…" : "Loading recent history…"}
-                  </div>
-                ) : onlineCount === 0 && liveSeries.every((p) => p.power === 0) ? (
-                  <div className="h-full flex flex-col items-center justify-center text-center px-6">
-                    <div className="w-14 h-14 rounded-full bg-slate-100 flex items-center justify-center mb-3">
-                      <Zap size={22} className="text-slate-400" />
-                    </div>
-                    <p className="text-sm font-semibold text-slate-600">All inverters offline</p>
-                    <p className="text-xs text-slate-400 mt-1 max-w-xs">
-                      Live generation will appear here once any inverter comes back online.
-                    </p>
-                  </div>
-                ) : (
-                  <ResponsiveContainer>
-                    <BarChart data={liveSeries} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                      <XAxis dataKey="time" tick={{ fontSize: 10, fill: "#6B7280" }} minTickGap={30} />
-                      <YAxis tick={{ fontSize: 11, fill: "#6B7280" }} unit=" W" domain={[0, "auto"]} width={70} />
-                      <Tooltip
-                        formatter={(v) => [`${Number(v).toFixed(0)} W`, "Power"]}
-                        contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                      />
-                      <Bar dataKey="power" name="Power" radius={[4, 4, 0, 0]} maxBarSize={18}>
-                        {liveSeries.map((_, i) => (
-                          <Cell key={i} fill="#E97451" opacity={0.55 + (i / liveSeries.length) * 0.45} />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                )
-              ) : histLoading ? (
-                <div className="flex flex-col items-center justify-center h-full text-sm text-slate-400">
-                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-orange-500 border-t-transparent mb-3" />
-                  Loading aggregates…
-                </div>
-              ) : histError ? (
-                <div className="flex flex-col items-center justify-center h-full text-sm text-red-500 px-6 text-center">
-                  <AlertTriangle size={20} className="mb-2" />
-                  <p className="font-semibold">Couldn&apos;t load aggregates</p>
-                  <p className="text-xs text-slate-500 mt-1">{histError.message}</p>
-                </div>
-              ) : historicalChart.length === 0 ? (
-                <div className="flex items-center justify-center h-full text-sm text-slate-400">
-                  No data in this range yet.
-                </div>
-              ) : range === "7d" ? (
-                // Sticky Y-axis + scrollable plot area for the wide 7-day view.
-                <div className="relative" style={{ height: 480 }}>
-                  {/* Sticky Y-axis layer */}
-                  <div
-                    className="absolute top-0 left-0 z-10 pointer-events-none bg-white"
-                    style={{ width: 70, height: 480 }}
-                  >
-                    <BarChart
-                      width={70}
-                      height={480}
-                      data={historicalChart}
-                      margin={{ top: 10, right: 0, left: 5, bottom: 30 }}
-                    >
-                      <YAxis
-                        domain={[0, "auto"]}
-                        tick={{ fontSize: 11, fill: "#6B7280" }}
-                        unit=" kWh"
-                      />
-                      <Bar dataKey="energy" fill="transparent" />
-                    </BarChart>
-                  </div>
-                  {/* Scrollable plot — Y-axis hidden but space reserved */}
-                  <div className="overflow-x-auto scrollbar-thin" style={{ height: 480 }}>
-                    {chartType === "line" ? (
-                      <ComposedChart
-                        width={Math.max(800, historicalChart.length * 14)}
-                        height={480}
-                        data={historicalChart}
-                        margin={{ top: 24, right: 20, left: 0, bottom: 0 }}
-                      >
-                        <defs>
-                          <linearGradient id="dashLineShadow7d" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#60A5FA" stopOpacity={0.35} />
-                            <stop offset="100%" stopColor="#60A5FA" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                        <XAxis
-                          dataKey="label"
-                          tick={{ fontSize: 10, fill: "#6B7280" }}
-                          interval={Math.max(0, Math.floor(historicalChart.length / 30))}
-                        />
-                        <YAxis domain={[0, "auto"]} tick={false} axisLine={false} width={70} />
-                        <Tooltip
-                          formatter={(v) => [`${Number(v).toFixed(3)} kWh`, "Energy"]}
-                          contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                        />
-                        <Area
-                          type="monotone"
-                          dataKey="energy"
-                          stroke="none"
-                          fill="url(#dashLineShadow7d)"
-                          isAnimationActive={false}
-                          legendType="none"
-                          tooltipType="none"
-                        />
-                        <Line
-                          type="monotone"
-                          connectNulls
-                          dataKey="energy"
-                          name="energy"
-                          stroke="#5B6BB5"
-                          strokeWidth={2}
-                          dot={{ r: 2, fill: "#5B6BB5", strokeWidth: 0 }}
-                          activeDot={{ r: 5 }}
-                          isAnimationActive={false}
-                        />
-                        {hiPoint && (
-                          <ReferenceDot
-                            x={hiPoint.label}
-                            y={hiPoint.energy || 0}
-                            r={5}
-                            fill="#DC2626"
-                            stroke="#fff"
-                            strokeWidth={1.5}
-                          />
-                        )}
-                        {loPoint && loPoint !== hiPoint && (
-                          <ReferenceDot
-                            x={loPoint.label}
-                            y={loPoint.energy || 0}
-                            r={5}
-                            fill="#0F766E"
-                            stroke="#fff"
-                            strokeWidth={1.5}
-                          />
-                        )}
-                      </ComposedChart>
-                    ) : (
-                      <BarChart
-                        width={Math.max(800, historicalChart.length * 14)}
-                        height={480}
-                        data={historicalChart}
-                        margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                        <XAxis
-                          dataKey="label"
-                          tick={{ fontSize: 10, fill: "#6B7280" }}
-                          interval={Math.max(0, Math.floor(historicalChart.length / 30))}
-                        />
-                        <YAxis domain={[0, "auto"]} tick={false} axisLine={false} width={70} />
-                        <Tooltip
-                          formatter={(v) => [`${Number(v).toFixed(3)} kWh`, "Energy"]}
-                          contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                        />
-                        <Bar dataKey="energy" name="energy" radius={[3, 3, 0, 0]} maxBarSize={14}>
-                          {historicalChart.map((_, i) => (
-                            <Cell key={i} fill="#E97451" opacity={0.6 + (i / historicalChart.length) * 0.4} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    )}
-                  </div>
-                </div>
-              ) : chartType === "line" ? (
-                // Line view — same data, with highest / lowest markers.
-                <ResponsiveContainer>
-                  <ComposedChart data={historicalChart} margin={{ top: 24, right: 20, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="dashLineShadow" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#60A5FA" stopOpacity={0.35} />
-                        <stop offset="100%" stopColor="#60A5FA" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                    <XAxis
-                      dataKey="label"
-                      tick={{ fontSize: 10, fill: "#6B7280" }}
-                      interval={range === "30d" ? "preserveStartEnd" : 0}
-                      angle={range === "30d" ? -30 : 0}
-                      textAnchor={range === "30d" ? "end" : "middle"}
-                      height={range === "30d" ? 50 : 30}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: "#6B7280" }}
-                      unit={isPowerView ? undefined : " kWh"}
-                      tickFormatter={isPowerView ? (v) => `${(Number(v) / 1000).toFixed(1)} kW` : undefined}
-                      width={70}
-                      domain={[0, "auto"]}
-                    />
-                    <Tooltip
-                      formatter={(v) =>
-                        isPowerView
-                          ? [`${(Number(v) / 1000).toFixed(2)} kW`, "Avg Power"]
-                          : [`${Number(v).toFixed(3)} kWh`, "Energy"]
+            {/* Chart — one hopeCloud-styled trend for every range. Dense ranges
+                get a brush instead of the old sticky-Y-axis + scroll workaround. */}
+            {histLoading ? (
+              <div
+                className="flex flex-col items-center justify-center text-sm text-slate-400"
+                style={{ height: 480 }}
+              >
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-orange-500 border-t-transparent mb-3" />
+                Loading aggregates…
+              </div>
+            ) : histError ? (
+              <div
+                className="flex flex-col items-center justify-center text-sm text-red-500 px-6 text-center"
+                style={{ height: 480 }}
+              >
+                <AlertTriangle size={20} className="mb-2" />
+                <p className="font-semibold">Couldn&apos;t load aggregates</p>
+                <p className="text-xs text-slate-500 mt-1">{histError.message}</p>
+              </div>
+            ) : (
+              <TrendChart
+                data={historicalChart}
+                xKey="label"
+                height={480}
+                unitLeft="kW"
+                brush={historicalChart.length > 40}
+                xAngle={range === "30d" ? -30 : 0}
+                xInterval={range === "30d" ? "preserveStartEnd" : undefined}
+                yLeftFormatter={(v) => (Number(v) / 1000).toFixed(1)}
+                tooltipLabelFormatter={(l, payload) => {
+                  // Slots carry their own timestamp, so the readout names the
+                  // exact moment on every range rather than a bucket label.
+                  const t = payload?.[0]?.payload?.sortKey;
+                  return t ? fmtSlot(t) : l;
+                }}
+                markers={
+                  chartType === "line" && hiPoint
+                    ? {
+                        hi: { x: hiPoint.label, y: hiPoint[chartValueKey] || 0 },
+                        lo:
+                          loPoint && loPoint !== hiPoint
+                            ? { x: loPoint.label, y: loPoint[chartValueKey] || 0 }
+                            : undefined,
                       }
-                      labelFormatter={(l) =>
-                        range === "1h" ? `5-min bucket: ${l}` :
-                        range === "24h" ? `Hour: ${l}` : `Day: ${l}`
-                      }
-                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey={chartValueKey}
-                      stroke="none"
-                      fill="url(#dashLineShadow)"
-                      isAnimationActive={false}
-                      legendType="none"
-                      tooltipType="none"
-                    />
-                    <Line
-                      type="monotone"
-                      connectNulls
-                      dataKey={chartValueKey}
-                      name={chartValueKey}
-                      stroke="#5B6BB5"
-                      strokeWidth={2}
-                      dot={{ r: 3, fill: "#5B6BB5", strokeWidth: 0 }}
-                      activeDot={{ r: 5 }}
-                      isAnimationActive={false}
-                    />
-                    {hiPoint && (
-                      <ReferenceDot
-                        x={hiPoint.label}
-                        y={hiPoint[chartValueKey] || 0}
-                        r={5}
-                        fill="#DC2626"
-                        stroke="#fff"
-                        strokeWidth={1.5}
-                      />
-                    )}
-                    {loPoint && loPoint !== hiPoint && (
-                      <ReferenceDot
-                        x={loPoint.label}
-                        y={loPoint[chartValueKey] || 0}
-                        r={5}
-                        fill="#0F766E"
-                        stroke="#fff"
-                        strokeWidth={1.5}
-                      />
-                    )}
-                  </ComposedChart>
-                </ResponsiveContainer>
-              ) : (
-                // 1h / 24h / 30d — fits within the card; no scroll needed.
-                <ResponsiveContainer>
-                  <BarChart data={historicalChart} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" vertical={false} />
-                    <XAxis
-                      dataKey="label"
-                      tick={{ fontSize: 10, fill: "#6B7280" }}
-                      interval={range === "30d" ? "preserveStartEnd" : 0}
-                      angle={range === "30d" ? -30 : 0}
-                      textAnchor={range === "30d" ? "end" : "middle"}
-                      height={range === "30d" ? 50 : 30}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: "#6B7280" }}
-                      unit={isPowerView ? undefined : " kWh"}
-                      tickFormatter={isPowerView ? (v) => `${(Number(v) / 1000).toFixed(1)} kW` : undefined}
-                      width={70}
-                    />
-                    <Tooltip
-                      formatter={(v) =>
-                        isPowerView
-                          ? [`${(Number(v) / 1000).toFixed(2)} kW`, "Avg Power"]
-                          : [`${Number(v).toFixed(3)} kWh`, "Energy"]
-                      }
-                      labelFormatter={(l) =>
-                        range === "1h" ? `5-min bucket: ${l}` :
-                        range === "24h" ? `Hour: ${l}` : `Day: ${l}`
-                      }
-                      contentStyle={{ fontSize: 12, borderRadius: 8 }}
-                    />
-                    <Bar
-                      dataKey={isPowerView ? "avgPower" : "energy"}
-                      name={isPowerView ? "avgPower" : "energy"}
-                      radius={[4, 4, 0, 0]}
-                      maxBarSize={range === "1h" ? 48 : 40}
-                    >
-                      {historicalChart.map((_, i) => (
-                        <Cell key={i} fill="#E97451" opacity={0.65 + (i / historicalChart.length) * 0.35} />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              )}
-            </div>
+                    : undefined
+                }
+                series={[
+                  {
+                    key: chartValueKey,
+                    name: "Avg Power",
+                    type: chartType === "line" ? "area" : "bar",
+                    unit: "kW",
+                    decimals: 2,
+                    transform: (v) => Number(v) / 1000,
+                    maxBarSize: range === "1h" ? 48 : 28,
+                  },
+                ]}
+              />
+            )}
           </div>
 
           {/* Right column: Weather stacked above Recent Activity */}
@@ -823,6 +680,7 @@ export default function DashboardPage() {
                 <tr>
                   <th className="text-center px-5 py-3 font-semibold">Name</th>
                   <th className="text-center px-5 py-3 font-semibold">Serial</th>
+                  <th className="text-center px-5 py-3 font-semibold">Location</th>
                   <th className="text-center px-5 py-3 font-semibold">Status</th>
                   <th className="text-center px-5 py-3 font-semibold">Power Out</th>
                   <th className="text-center px-5 py-3 font-semibold">Temp</th>
@@ -842,6 +700,18 @@ export default function DashboardPage() {
                     <tr key={inv.id} className="border-b border-slate-100 hover:bg-slate-50 transition">
                       <td className="px-5 py-3 text-center font-semibold text-slate-900">{inv.name}</td>
                       <td className="px-5 py-3 text-center text-slate-500 font-mono text-xs">{inv.serial_number}</td>
+                      <td className="px-5 py-3 text-center text-slate-600 text-xs">
+                        {formatLocation(inv) ? (
+                          <span className="inline-flex items-center gap-1 max-w-52">
+                            <MapPin size={11} className="text-slate-400 shrink-0" />
+                            <span className="truncate" title={formatLocation(inv)}>
+                              {formatLocation(inv)}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
+                      </td>
                       <td className="px-5 py-3 text-center"><StatusBadge status={status} /></td>
                       <td className="px-5 py-3 text-center text-slate-700">
                         {offline ? 0 : Number(inv.power_out ?? 0).toFixed(0)} W
@@ -868,7 +738,7 @@ export default function DashboardPage() {
                   );
                 })}
                 {!inverters.length && (
-                  <tr><td colSpan={7} className="text-center text-slate-400 py-10 text-sm">No inverters yet.</td></tr>
+                  <tr><td colSpan={8} className="text-center text-slate-400 py-10 text-sm">No inverters yet.</td></tr>
                 )}
               </tbody>
             </table>

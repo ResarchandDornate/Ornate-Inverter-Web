@@ -92,3 +92,45 @@ export function formatLastSeen(iso) {
     return "—";
   }
 }
+
+// Where the unit is installed, as one line. `address` is the full site line and
+// `city` the town; both are shown, but the city is dropped when the address
+// already names it — otherwise sites read "…, Pune 413216, Pune". Returns null
+// when the backend has neither, so callers can choose their own placeholder.
+export function formatLocation(inv) {
+  const address = inv?.address?.trim();
+  const city = inv?.city?.trim();
+  if (address && city) {
+    return address.toLowerCase().includes(city.toLowerCase())
+      ? address
+      : `${address}, ${city}`;
+  }
+  return address || city || null;
+}
+
+// ---------------------------------------------------------------------------
+// Sites
+//
+// The backend has no site/plant field — hopeCloud groups devices under a Plant,
+// this API does not — so a "site" is derived from where the unit is installed.
+// `city` is the natural site name; the street address stands in for records
+// that only carry one. Units with neither fall into a single bucket rather than
+// disappearing from a site-scoped view.
+// ---------------------------------------------------------------------------
+
+export const UNASSIGNED_SITE = "Unassigned";
+
+export function siteOf(inv) {
+  return inv?.city?.trim() || inv?.address?.trim() || UNASSIGNED_SITE;
+}
+
+// Distinct sites in a fleet, alphabetical, with "Unassigned" pinned last.
+export function listSites(inverters = []) {
+  const seen = new Set();
+  inverters.forEach((inv) => seen.add(siteOf(inv)));
+  return [...seen].sort((a, b) => {
+    if (a === UNASSIGNED_SITE) return 1;
+    if (b === UNASSIGNED_SITE) return -1;
+    return a.localeCompare(b);
+  });
+}

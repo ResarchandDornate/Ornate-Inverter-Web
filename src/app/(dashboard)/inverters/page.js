@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Search, RefreshCw, Plus } from "lucide-react";
+import { Search, RefreshCw, Plus, MapPin } from "lucide-react";
 import Topbar from "@/components/Topbar";
 import StatusBadge from "@/components/StatusBadge";
-import { useLiveInverters } from "@/hooks/useLiveInverters";
+import { useScopedInverters } from "@/hooks/useScopedInverters";
 import {
   computeStatus,
   formatLastSeen,
@@ -13,13 +13,14 @@ import {
   parseFaultBitmask,
   hasActiveFault,
   formatFaultBitmask,
+  formatLocation,
 } from "@/lib/inverterStatus";
 
 export default function InvertersListPage() {
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
 
-  const { data: inverters = [], refetch, isRefetching } = useLiveInverters();
+  const { data: inverters = [], refetch, isRefetching } = useScopedInverters();
 
   const filtered = useMemo(() => {
     let arr = inverters;
@@ -96,6 +97,7 @@ export default function InvertersListPage() {
                   <th className="text-center px-5 py-3 font-semibold">Inverter</th>
                   <th className="text-center px-5 py-3 font-semibold">Serial No.</th>
                   <th className="text-center px-5 py-3 font-semibold">Model</th>
+                  <th className="text-center px-5 py-3 font-semibold">Location</th>
                   <th className="text-center px-5 py-3 font-semibold">Status</th>
                   <th className="text-center px-5 py-3 font-semibold">Last Seen</th>
                   <th className="text-center px-5 py-3 font-semibold">Power Out (W)</th>
@@ -124,6 +126,21 @@ export default function InvertersListPage() {
                       </td>
                       <td className="px-5 py-3.5 text-slate-600 font-mono text-xs">{inv.serial_number}</td>
                       <td className="px-5 py-3.5 text-slate-700 text-xs">{inv.model || "—"}</td>
+                      {/* Address was already searchable from the toolbar but had
+                          no column to show it — you could match a site you could
+                          not then see. */}
+                      <td className="px-5 py-3.5 text-slate-600 text-xs max-w-56">
+                        {formatLocation(inv) ? (
+                          <span className="flex items-start gap-1">
+                            <MapPin size={11} className="text-slate-400 shrink-0 mt-0.5" />
+                            <span className="truncate" title={formatLocation(inv)}>
+                              {formatLocation(inv)}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="text-slate-300">—</span>
+                        )}
+                      </td>
                       <td className="px-5 py-3.5"><StatusBadge status={status} /></td>
                       <td className="px-5 py-3.5 text-center text-slate-500 text-xs">
                         {formatLastSeen(inv.last_seen)}
@@ -159,7 +176,7 @@ export default function InvertersListPage() {
                 })}
                 {!filtered.length && (
                   <tr>
-                    <td colSpan={10} className="text-center text-slate-400 py-12 text-sm">
+                    <td colSpan={11} className="text-center text-slate-400 py-12 text-sm">
                       No inverters match your filter.
                     </td>
                   </tr>
